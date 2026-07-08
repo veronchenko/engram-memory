@@ -1,9 +1,8 @@
 """
-Parametrized backend tests for Engram.
+SQLite backend tests for Engram.
 
-Runs the same test suite against all three backends (Xapian, SQLite, Whoosh)
-via pytest parametrize. Each test exercises the KnowledgeBase CRUD, search,
-tags, relations, and rebuild operations identically across backends.
+Exercises the KnowledgeBase CRUD, search, tags, relations, and rebuild
+operations against the SQLite FTS5 backend.
 """
 
 from __future__ import annotations
@@ -18,9 +17,8 @@ import pytest
 # Allow importing from project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from backend.sqlite.main import SQLiteBackend
-from backend.xapian.main import XapianBackend
 from database import KnowledgeBase
+from search_backend import SQLiteBackend
 
 
 # ---------------------------------------------------------------------------
@@ -28,19 +26,11 @@ from database import KnowledgeBase
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(params=["xapian", "sqlite"])
-def kb(request: pytest.FixtureRequest, tmp_path: Path) -> KnowledgeBase:
-    """KnowledgeBase with each backend."""
+@pytest.fixture()
+def kb(tmp_path: Path) -> KnowledgeBase:
+    """KnowledgeBase backed by SQLiteBackend."""
 
-    name: str = request.param
-    index_path = tmp_path / "index" / name
-
-    if name == "xapian":
-        backend = XapianBackend(index_path)
-    elif name == "sqlite":
-        backend = SQLiteBackend(index_path / "engram.db")
-    else:
-        pytest.fail(f"Unknown backend: {name}")
+    backend = SQLiteBackend(tmp_path / "index" / "engram.db")
 
     # Initialized
     return KnowledgeBase(str(tmp_path), backend=backend)
@@ -78,7 +68,7 @@ def _create_entry(
 
 
 class TestCRUD:
-    """CRUD operations across all backends."""
+    """CRUD operations against the SQLite backend."""
 
     def test_remember_create(self, kb: KnowledgeBase) -> None:
         """New title with no existing entry creates a new entry."""
@@ -164,7 +154,7 @@ class TestCRUD:
 
 
 class TestSearch:
-    """Full-text search operations across all backends."""
+    """Full-text search operations against the SQLite backend."""
 
     def test_search_basic(self, kb: KnowledgeBase) -> None:
         """Searching by a keyword finds the matching entry."""
@@ -241,7 +231,7 @@ class TestSearch:
 
 
 class TestTags:
-    """Tag listing and filtering across all backends."""
+    """Tag listing and filtering against the SQLite backend."""
 
     def test_list_tags(self, kb: KnowledgeBase) -> None:
         """list_tags returns correct per-tag counts."""
@@ -282,7 +272,7 @@ class TestTags:
 
 
 class TestRelations:
-    """Graph relation operations across all backends."""
+    """Graph relation operations against the SQLite backend."""
 
     def test_relations_outgoing(self, kb: KnowledgeBase) -> None:
         """Entry with kb://uuid#type link has outgoing relations."""
@@ -360,7 +350,7 @@ class TestRelations:
 
 
 class TestRebuild:
-    """Index rebuild operations across all backends."""
+    """Index rebuild operations against the SQLite backend."""
 
     def test_rebuild(self, kb: KnowledgeBase) -> None:
         """Rebuilding the index preserves entry count and search capability."""
@@ -403,7 +393,7 @@ class TestRebuild:
 
 
 class TestExtendedSchema:
-    """Extended schema fields (type/resource) across all backends."""
+    """Extended schema fields (type/resource) against the SQLite backend."""
 
     def test_index_with_new_fields_no_error(self, kb: KnowledgeBase) -> None:
         """Indexing an entry with type/resource succeeds and round-trips."""
@@ -420,3 +410,79 @@ class TestExtendedSchema:
         assert entry is not None
         assert entry["type"] == "hub"
         assert entry["resource"] == "https://github.com/org/repo"
+
+
+# ===========================================================================
+# Hybrid semantic search
+# ===========================================================================
+
+
+class TestHybridSearch:
+    """Semantic (Model2Vec) + BM25 fusion search against the SQLite backend."""
+
+    def test_paraphrase_recall(self, kb: KnowledgeBase) -> None:
+        """A query sharing no keywords with the entry still finds it by meaning."""
+
+        _create_entry(
+            kb,
+            "Kubernetes Deployment Guide",
+            "How to roll out containerized workloads onto a cluster.",
+            ["infra"],
+            force=True,
+        )
+
+        # No literal keyword overlap with the entry's title/content
+        results = kb.search("orchestrating containers across machines")
+
+        assert any(r["title"] == "Kubernetes Deployment Guide" for r in results)
+
+    def test_fusion_surfaces_both_keyword_and_semantic_matches(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """A query matches one entry by keyword and another by meaning."""
+
+        _create_entry(
+            kb, "Ansible Playbook Guide", "How to write playbooks.", force=True
+        )
+        _create_entry(
+            kb,
+            "Automating Server Configuration",
+            "Declarative scripts that provision and configure machines.",
+            force=True,
+        )
+
+        results = kb.search("playbook automation")
+
+        titles = {r["title"] for r in results}
+        assert "Ansible Playbook Guide" in titles
+
+    def test_search_degrades_to_bm25_when_model_unavailable(
+        self, kb: KnowledgeBase, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the embedding model can't load, keyword search still works."""
+
+        import search_backend
+
+        monkeypatch.setattr(search_backend, "_get_model", lambda name: None)
+
+        _create_entry(kb, "Ansible Playbook Guide", "How to write playbooks.")
+
+        results = kb.search("playbook")
+
+        assert any(r["title"] == "Ansible Playbook Guide" for r in results)
+
+    def test_rebuild_batch_encodes_embeddings(self, kb: KnowledgeBase) -> None:
+        """Rebuild recomputes embeddings so semantic recall survives a rebuild."""
+
+        _create_entry(
+            kb,
+            "Kubernetes Deployment Guide",
+            "How to roll out containerized workloads onto a cluster.",
+            ["infra"],
+            force=True,
+        )
+
+        kb.rebuild()
+
+        results = kb.search("orchestrating containers across machines")
+        assert any(r["title"] == "Kubernetes Deployment Guide" for r in results)

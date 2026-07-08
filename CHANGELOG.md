@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.0
+
+- feat: `search` is now hybrid — SQLite FTS5 (BM25) fused with cosine similarity over local Model2Vec embeddings (`minishlab/potion-multilingual-128M`) via Reciprocal Rank Fusion, so queries that share no literal words with an entry can still find it by meaning
+- Entries store an `embedding` BLOB column (migrated in place on existing indexes); computed on `remember` and batch-computed on `rebuild`
+- New `--embedding-model`/`ENGRAM_EMBEDDING_MODEL` option (default `minishlab/potion-multilingual-128M`)
+- Degrades gracefully to keyword-only search if the embedding model can't load (no network on first run)
+- `Dockerfile` gains a `test` build stage (`docker build --target test` / `docker run --rm engram-test`) so `pytest`/`tests/` never ship in the production image; also pre-downloads the embedding model so runtime and tests never need network access for it
+
+## 0.8.0
+
+- **Breaking:** removed the pluggable backend abstraction and the Xapian backend — SQLite FTS5 (Porter stemming, BM25 ranking) is now the only search backend
+- **Breaking:** removed `--backend`/`ENGRAM_BACKEND` and `--language`/`ENGRAM_LANGUAGE` CLI/env options
+- **Breaking:** default index path changed from `<data-path>/index/<backend>/` to `<data-path>/index/engram.db` — run `rebuild` after upgrading to reindex
+- `src/backend/` (both `xapian/` and `sqlite/` subpackages plus the `SearchBackend` ABC) replaced by a single `src/search_backend.py` module
+- Reason: two backends doing the same job (keyword full-text search) didn't justify an `importlib`-based plugin system; simplifies the codebase ahead of adding real search-strategy diversity (e.g. a hybrid semantic backend)
+
 ## 0.7.0
 
 - feat: entries support optional `type`, `resource` frontmatter fields

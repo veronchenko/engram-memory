@@ -3,7 +3,7 @@ Tests for server.py — tool registration and basic tool behaviour.
 
 Exercises the register_tools() function with a real KnowledgeBase on
 a tmp_path directory and a fresh FastMCP instance.  Also covers
-parse_args, setup_logging, and _create_backend.
+parse_args and setup_logging.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from mcp.server.fastmcp import FastMCP
 
 from database import KnowledgeBase
-from server import _create_backend, parse_args, register_tools, setup_logging
+from server import parse_args, register_tools, setup_logging
 
 
 # ---------------------------------------------------------------------------
@@ -287,21 +287,19 @@ class TestParseArgs:
         assert args.transport == "stdio"
         assert args.host == "0.0.0.0"
         assert args.port == 8192
-        assert args.backend == "xapian"
-        assert args.language == "en"
 
     def test_parse_args_custom(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Custom CLI arguments override defaults."""
 
         monkeypatch.setattr(
             "sys.argv",
-            ["server.py", "--backend", "sqlite", "--language", "fr"],
+            ["server.py", "--data-path", "/custom", "--port", "9000"],
         )
 
         args = parse_args()
 
-        assert args.backend == "sqlite"
-        assert args.language == "fr"
+        assert args.data_path == "/custom"
+        assert args.port == 9000
 
 
 # ---------------------------------------------------------------------------
@@ -326,44 +324,6 @@ class TestSetupLogging:
         handler = logger.handlers[-1]
         assert handler.formatter is not None
         assert handler.formatter.datefmt == "%Y-%m-%d %H:%M:%S"
-
-
-# ---------------------------------------------------------------------------
-# _create_backend
-# ---------------------------------------------------------------------------
-
-
-class TestCreateBackend:
-    """Verify the backend factory function."""
-
-    def test_create_backend_xapian(self, tmp_path: Path) -> None:
-        """Xapian backend is created successfully."""
-
-        from backend.xapian.main import XapianBackend
-
-        backend = _create_backend("xapian", tmp_path, "en")
-
-        # Must be the correct type
-        assert isinstance(backend, XapianBackend)
-
-    def test_create_backend_sqlite(self, tmp_path: Path) -> None:
-        """SQLite backend is created successfully."""
-
-        from backend.sqlite.main import SQLiteBackend
-
-        backend = _create_backend("sqlite", tmp_path, "en")
-
-        # Must be the correct type
-        assert isinstance(backend, SQLiteBackend)
-
-    def test_create_backend_unknown(self, tmp_path: Path) -> None:
-        """Unknown backend name raises SystemExit."""
-
-        with pytest.raises(SystemExit) as exc_info:
-            _create_backend("nonexistent_backend", tmp_path, "en")
-
-        # Exit code 1
-        assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------

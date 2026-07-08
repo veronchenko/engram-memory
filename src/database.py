@@ -1,9 +1,9 @@
 """
-Knowledge Base — Markdown files + pluggable search backend.
+Knowledge Base — Markdown files + SQLite FTS5 search backend.
 
 Manages entries stored as Markdown files with YAML frontmatter. Each entry
-has a UUID, title, tags list, and content body. A search backend provides
-full-text search (Xapian by default, with French stemming).
+has a UUID, title, tags list, and content body. SQLite FTS5 provides
+full-text search with Porter stemming.
 
 Source of truth: the Markdown files. The search index is a rebuildable cache.
 """
@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from backend import SearchBackend, extract_relations
+from search_backend import SQLiteBackend, extract_relations
 
 logger = logging.getLogger("engram")
 
@@ -63,18 +63,17 @@ class KnowledgeBase:
 
     Args:
         data_path: Root path for knowledge data (contains entries/ and index/).
-        backend: Optional search backend instance. Defaults to XapianBackend.
+        backend: Optional search backend instance. Defaults to SQLiteBackend.
     """
 
-    def __init__(self, data_path: str, backend: SearchBackend | None = None) -> None:
+    def __init__(self, data_path: str, backend: SQLiteBackend | None = None) -> None:
         """
         Initialize the knowledge base.
 
         Args:
             data_path: Root directory for knowledge storage.
             backend: Search backend instance. When None, creates a
-                XapianBackend at data_path/index/fr/ for backward
-                compatibility.
+                SQLiteBackend at data_path/index/engram.db.
 
         Errors:
             Creates entries/ subdirectory if missing.
@@ -82,16 +81,14 @@ class KnowledgeBase:
 
         self._data_path = Path(data_path)
         self._entries_path = self._data_path / "entries"
-        self._index_path = self._data_path / "index" / "fr"
+        self._index_path = self._data_path / "index" / "engram.db"
 
         # Ensure entries directory exists
         self._entries_path.mkdir(parents=True, exist_ok=True)
 
-        # Initialize search backend (default: Xapian for backward compat)
+        # Initialize search backend (default: SQLite FTS5)
         if backend is None:
-            from backend.xapian.main import XapianBackend
-
-            backend = XapianBackend(self._index_path)
+            backend = SQLiteBackend(self._index_path)
         self._backend = backend
 
         # In-memory metadata cache: entry_id -> {title, tags}

@@ -1,12 +1,13 @@
 """
-Engram — persistent knowledge base MCP server with full-text search.
+Engram — persistent knowledge base MCP server with hybrid search.
 
 Provides MCP tools for storing, searching, and managing knowledge entries.
-Entries are Markdown files with YAML frontmatter, indexed by a pluggable
-search backend (Xapian by default, with configurable stemming).
+Entries are Markdown files with YAML frontmatter, indexed by SQLite FTS5
+(Porter stemming) fused with local Model2Vec semantic embeddings via
+Reciprocal Rank Fusion.
 
 Transport: stdio (stdin/stdout for MCP protocol, managed by Claude Code).
-Data: Markdown files in --data-path/entries/, search index in --data-path/index/fr/.
+Data: Markdown files in --data-path/entries/, search index in --data-path/index/engram.db.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from database import KnowledgeBase
+from search_backend import DEFAULT_EMBEDDING_MODEL, SQLiteBackend
 
 # ---------------------------------------------------------------------------
 # CLI arguments (all have ENGRAM_* env var fallbacks, args take priority)
@@ -68,14 +70,12 @@ def parse_args() -> argparse.Namespace:
         help="Listen port (env: ENGRAM_PORT, default: 8192)",
     )
     parser.add_argument(
-        "--backend",
-        default=_env("BACKEND", "xapian"),
-        help="Search backend: xapian, sqlite (env: ENGRAM_BACKEND, default: xapian)",
-    )
-    parser.add_argument(
-        "--language",
-        default=_env("LANGUAGE", "en"),
-        help="Stemmer language (env: ENGRAM_LANGUAGE, default: en)",
+        "--embedding-model",
+        default=_env("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+        help=(
+            "Model2Vec HuggingFace hub id for semantic search "
+            f"(env: ENGRAM_EMBEDDING_MODEL, default: {DEFAULT_EMBEDDING_MODEL})"
+        ),
     )
 
     # Parsed arguments
@@ -144,10 +144,12 @@ def register_tools(
         limit: int = 10,
     ) -> dict:
         """
-        Search the knowledge base using full-text search.
+        Search the knowledge base using hybrid keyword + semantic search.
 
-        Uses Xapian with configurable stemming. Supports wildcards and spelling
-        correction. Results ranked by relevance.
+        Fuses SQLite FTS5 (BM25, Porter stemming) with cosine similarity
+        over local Model2Vec embeddings via Reciprocal Rank Fusion, so
+        queries that share no literal words with an entry can still find
+        it by meaning.
 
         Args:
             query: Search query string.
@@ -421,74 +423,6 @@ def register_tools(
 
 
 # ---------------------------------------------------------------------------
-# Backend factory
-# ---------------------------------------------------------------------------
-
-
-def _create_backend(name: str, index_base: Path, language: str):
-    """
-    Create a search backend by name (dynamic import).
-
-    Loads backend.{name}.main and looks for a Backend class that
-    inherits from SearchBackend. Any directory in backend/ with a
-    main.py exporting a Backend class is a valid backend.
-
-    Args:
-        name: Backend name (directory name under backend/).
-        index_base: Base path for index storage.
-        language: Stemmer language code.
-
-    Returns:
-        A SearchBackend instance.
-
-    Errors:
-        Raises SystemExit if the backend is unknown or unavailable.
-    """
-
-    import importlib
-
-    index_path = index_base / name
-
-    try:
-        module = importlib.import_module(f"backend.{name}.main")
-    except ModuleNotFoundError:
-        # List available backends
-        available = [
-            d.name
-            for d in (Path(__file__).parent / "backend").iterdir()
-            if d.is_dir() and (d / "main.py").exists()
-        ]
-        print(f"Unknown backend: {name}. Available: {', '.join(sorted(available))}")
-        raise SystemExit(1)
-
-    # Find the Backend class (first SearchBackend subclass in the module)
-    from backend import SearchBackend
-
-    backend_cls = None
-    for attr_name in dir(module):
-        attr = getattr(module, attr_name)
-        if (
-            isinstance(attr, type)
-            and issubclass(attr, SearchBackend)
-            and attr is not SearchBackend
-        ):
-            backend_cls = attr
-            break
-
-    if backend_cls is None:
-        print(f"Backend {name} has no SearchBackend subclass in main.py")
-        raise SystemExit(1)
-
-    # Instantiate with index_path + language (backends accept **kwargs for flexibility)
-    try:
-        # Backend created
-        return backend_cls(index_path, language=language)
-    except TypeError:
-        # Fallback: backend doesn't accept language
-        return backend_cls(index_path)
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -505,12 +439,13 @@ def main() -> None:
     logger = setup_logging()
 
     logger.info("Initializing knowledge base from %s", args.data_path)
-    backend = _create_backend(
-        args.backend, Path(args.data_path) / "index", args.language
-    )
+    index_path = Path(args.data_path) / "index" / "engram.db"
+    backend = SQLiteBackend(index_path, embedding_model=args.embedding_model)
     kb = KnowledgeBase(args.data_path, backend=backend)
     logger.info(
-        "Knowledge base ready (backend=%s, language=%s)", args.backend, args.language
+        "Knowledge base ready (index=%s, embedding_model=%s)",
+        index_path,
+        args.embedding_model,
     )
 
     mcp = FastMCP(name="Engram", host=args.host, port=args.port)

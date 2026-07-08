@@ -244,7 +244,7 @@ class TestTags:
 
 
 class TestSearch:
-    """Tests for full-text search with Xapian."""
+    """Tests for full-text search with SQLite FTS5."""
 
     def test_search_basic(self, kb: KnowledgeBase) -> None:
         """Searching by a keyword finds the matching entry."""
