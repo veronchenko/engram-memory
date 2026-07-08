@@ -1,6 +1,18 @@
 {
   "description": "Nudges Claude Code to actually use the Engram MCP memory server — search before starting work, and remember non-trivial changes before finishing.",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__engram__search|mcp__engram__recall|mcp__engram__remember",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/engram_remember_gate.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

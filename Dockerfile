@@ -13,15 +13,17 @@ WORKDIR /app
 COPY src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download the embedding model into the image so runtime and tests
+# never need network access for it (cache dir chowned to engram below).
+# Done before COPY src/ so editing app code doesn't invalidate this layer
+# and force a re-download.
+ENV HF_HOME=/app/.cache/huggingface
+RUN python -c "from model2vec import StaticModel; StaticModel.from_pretrained('minishlab/potion-multilingual-128M')"
+
 # Copy application
 COPY src/ ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Pre-download the embedding model into the image so runtime and tests
-# never need network access for it (cache dir chowned to engram below).
-ENV HF_HOME=/app/.cache/huggingface
-RUN python -c "from model2vec import StaticModel; StaticModel.from_pretrained('minishlab/potion-multilingual-128M')"
 
 # Non-root user
 RUN addgroup -S engram && adduser -S engram -G engram

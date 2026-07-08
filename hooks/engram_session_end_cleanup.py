@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""SessionEnd hook: delete this session's Stop-counter state file.
+"""SessionEnd hook: delete this session's hook state files.
 
-engram_stop_prompt.py persists a per-session Stop count to a file under the
-system temp dir (see its docstring). SessionEnd hooks can't block session
-termination or talk to Claude, only run cleanup, so this just removes that
-one file. Fails open silently — a missing file, permission error, or any
-other issue here must never surface to the user or block session exit.
+engram_stop_prompt.py persists a per-session Stop count, and
+engram_remember_gate.py persists a per-session search/recall marker, each to
+a file under the system temp dir (see their docstrings). SessionEnd hooks
+can't block session termination or talk to Claude, only run cleanup, so this
+just removes those files. Fails open silently — a missing file, permission
+error, or any other issue here must never surface to the user or block
+session exit.
 """
 
 import json
@@ -21,8 +23,12 @@ except Exception:
         pass
 
 
-def _state_path(session_id: str) -> str:
-    return os.path.join(tempfile.gettempdir(), f"engram_stop_count_{session_id}.txt")
+def _state_paths(session_id: str) -> list[str]:
+    tmp = tempfile.gettempdir()
+    return [
+        os.path.join(tmp, f"engram_stop_count_{session_id}.txt"),
+        os.path.join(tmp, f"engram_searched_{session_id}.txt"),
+    ]
 
 
 def main() -> None:
@@ -36,12 +42,12 @@ def main() -> None:
         log("SessionEnd", "no session_id in payload, nothing to clean up")
         return
 
-    path = _state_path(session_id)
-    try:
-        os.remove(path)
-        log("SessionEnd", f"removed counter file for session={session_id}")
-    except FileNotFoundError:
-        log("SessionEnd", f"no counter file to remove for session={session_id}")
+    for path in _state_paths(session_id):
+        try:
+            os.remove(path)
+            log("SessionEnd", f"removed state file {path}")
+        except FileNotFoundError:
+            log("SessionEnd", f"no state file to remove at {path}")
 
 
 if __name__ == "__main__":

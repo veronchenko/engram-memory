@@ -88,7 +88,16 @@
 
   #topbar {
     position: absolute; top: var(--space-3); left: var(--space-3); right: var(--space-3);
-    display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; z-index: var(--z-topbar);
+    display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; z-index: var(--z-topbar);
+  }
+
+  .topbar-filters {
+    display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center;
+    flex: 1; min-width: 0;
+  }
+
+  .topbar-actions {
+    display: flex; align-items: center; gap: var(--space-3); margin-left: auto; flex: 0 0 auto;
   }
 
   .field {
@@ -116,9 +125,11 @@
   #search-results {
     position: absolute; top: calc(100% + var(--space-2)); left: 0; right: 0; z-index: var(--z-dropdown);
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: var(--shadow-panel); max-height: 360px; overflow-y: auto; display: none;
+    box-shadow: var(--shadow-panel); max-height: 360px; overflow-y: auto;
+    opacity: 0; transform: translateY(-4px) scale(0.98); transform-origin: top; pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-out-expo), transform var(--duration-fast) var(--ease-out-expo);
   }
-  #search-results.open { display: block; }
+  #search-results.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
   .search-hit {
     display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 0;
     padding: var(--space-3) var(--space-4); font-weight: 400; color: var(--text);
@@ -159,7 +170,19 @@
 
   button.danger { color: var(--danger); border-color: var(--border); }
   button.danger:hover { background: oklch(0.665 0.19 25 / 0.12); border-color: var(--danger); }
-  button.danger.confirming { background: var(--danger); color: var(--danger-ink); border-color: var(--danger); }
+  button.danger.confirming {
+    background: var(--danger); color: var(--danger-ink); border-color: var(--danger);
+    position: relative; overflow: hidden;
+  }
+  button.danger.confirming::after {
+    content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+    background: var(--danger-ink); transform-origin: left; transform: scaleX(1);
+    animation: confirm-countdown 4s linear forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button.danger.confirming::after { animation: none; transform: scaleX(0.5); }
+  }
+  @keyframes confirm-countdown { to { transform: scaleX(0); } }
 
   #spinner {
     width: 16px; height: 16px; border-radius: 50%;
@@ -169,12 +192,47 @@
   #spinner.visible { display: block; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  #legend {
+  #legend-wrap {
     position: absolute; left: var(--space-3); bottom: var(--space-3); z-index: var(--z-legend);
-    display: flex; flex-wrap: wrap; gap: var(--space-1); max-width: 60%;
+    max-width: 60%;
+  }
+  .legend-row { display: flex; align-items: flex-start; gap: var(--space-2); }
+
+  #legend {
+    display: flex; flex-wrap: wrap; gap: var(--space-1);
     background: oklch(0.205 0.018 260 / 0.85); backdrop-filter: blur(6px);
     border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-1);
   }
+
+  #btn-help {
+    flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border-radius: var(--radius-pill);
+    background: oklch(0.205 0.018 260 / 0.85); backdrop-filter: blur(6px);
+    border: 1px solid var(--border); color: var(--text-muted);
+    font-size: var(--text-md); font-weight: 600; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #btn-help:hover { color: var(--text); background: oklch(0.205 0.018 260 / 0.85); border-color: var(--border-strong); }
+  #btn-help[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+
+  #help-popover {
+    position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: var(--z-dropdown);
+    width: min(320px, 80vw); max-height: min(420px, 60vh); overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: var(--shadow-panel); padding: var(--space-4);
+    font-size: var(--text-base); color: var(--text-muted);
+    opacity: 0; transform: translateY(4px) scale(0.98); transform-origin: bottom left; pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-out-expo), transform var(--duration-fast) var(--ease-out-expo);
+  }
+  #help-popover[hidden] { display: none; }
+  #help-popover.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+  #help-popover h3 { margin: 0 0 var(--space-2); font-size: var(--text-md); font-weight: 600; color: var(--text); }
+  #help-popover section + section { margin-top: var(--space-4); }
+  #help-popover dl { margin: 0; }
+  #help-popover dt { color: var(--text); font-weight: 600; font-size: var(--text-base); margin-top: var(--space-2); }
+  #help-popover dt:first-child { margin-top: 0; }
+  #help-popover dd { margin: 0; font-size: var(--text-sm); }
+  #help-popover ul { margin: var(--space-1) 0 0; padding-left: 1.1em; }
+  #help-popover li { margin-top: var(--space-1); font-size: var(--text-sm); }
   .legend-item {
     display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-muted);
     background: none; border: 1px solid transparent; border-radius: var(--radius-sm);
@@ -189,9 +247,13 @@
 
   #panel {
     width: 380px; flex: 0 0 auto; border-left: 1px solid var(--border); background: var(--surface);
-    padding: var(--space-5); overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-1);
-    box-shadow: var(--shadow-panel);
+    overflow-y: auto; box-shadow: var(--shadow-panel);
   }
+  #panel-content {
+    padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-1);
+  }
+  #panel-content.content-enter { animation: panel-fade-in var(--duration-base) var(--ease-out-expo); }
+  @keyframes panel-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   #panel-close { display: none; }
 
   #panel h2 { margin: 0 0 var(--space-1); font-size: var(--text-xl); font-weight: 600; }
@@ -204,7 +266,16 @@
   }
   #panel input:hover, #panel textarea:hover { border-color: var(--border-strong); }
   #panel input:focus-visible, #panel textarea:focus-visible { outline: none; border-color: var(--accent); }
+  #panel input[aria-invalid="true"] { border-color: var(--danger); }
   #panel textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
+
+  .field-error { color: var(--danger); font-size: var(--text-sm); margin-top: var(--space-1); }
+  .field-error:empty { display: none; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
 
   .pill {
     display: inline-block; background: var(--bg); border: 1px solid var(--border);
@@ -263,9 +334,10 @@
       font-size: var(--text-xl); color: var(--text-muted); margin-bottom: var(--space-2);
     }
     #panel-close:hover { color: var(--text); background: none; }
-    #legend { max-width: calc(100% - 2 * var(--space-3)); }
+    #legend-wrap { max-width: calc(100% - 2 * var(--space-3)); }
     #topbar input[type=text] { max-width: none; }
     .search-wrap { max-width: none; flex-basis: 100%; }
+    .topbar-actions { flex-basis: 100%; justify-content: flex-end; margin-left: 0; }
   }
 </style>
 </head>
@@ -273,40 +345,89 @@
 <div id="layout">
   <div id="graph-pane">
     <div id="topbar">
-      <div class="search-wrap">
-        <input id="search-q" class="field" type="text" placeholder="Search entries…" aria-label="Search entries"
-          role="combobox" aria-expanded="false" aria-controls="search-results" autocomplete="off">
-        <button id="search-clear" aria-label="Clear search">&times;</button>
-        <div id="search-results" role="listbox"></div>
+      <div class="topbar-filters">
+        <div class="search-wrap">
+          <input id="search-q" class="field" type="text" placeholder="Search entries…" aria-label="Search entries"
+            role="combobox" aria-expanded="false" aria-controls="search-results" autocomplete="off">
+          <button id="search-clear" aria-label="Clear search">&times;</button>
+          <div id="search-results" role="listbox"></div>
+        </div>
+        <input id="filter-tag" class="field" type="text" placeholder="Filter by tag…" aria-label="Filter by tag">
+        <label class="checkbox-field">
+          <input id="include-superseded" type="checkbox"> superseded
+        </label>
       </div>
-      <input id="filter-tag" class="field" type="text" placeholder="Filter by tag…" aria-label="Filter by tag">
-      <label class="checkbox-field">
-        <input id="include-superseded" type="checkbox"> superseded
-      </label>
-      <div id="spinner" role="status" aria-label="Loading"></div>
-      <span style="flex:1"></span>
-      <button id="btn-new" class="primary">+ New entry</button>
+      <div class="topbar-actions">
+        <div id="spinner" role="status" aria-label="Loading"></div>
+        <button id="btn-new" class="primary">+ New entry</button>
+      </div>
     </div>
     <canvas id="graph" tabindex="0" role="img" aria-label="Knowledge graph. Click a node to view its entry."></canvas>
-    <div id="legend" role="group" aria-label="Filter by type"></div>
+    <div id="legend-wrap">
+      <div id="help-popover" role="dialog" aria-label="Entry types and graph controls" hidden>
+        <section>
+          <h3>Entry types</h3>
+          <dl>
+            <dt>hub</dt><dd>One per project — what it is, its stack, its connections.</dd>
+            <dt>feature</dt><dd>A notable feature and how it's built.</dd>
+            <dt>decision</dt><dd>A choice made among alternatives, without a standalone artifact.</dd>
+            <dt>pattern</dt><dd>A reusable approach that originated in one project.</dd>
+            <dt>integration</dt><dd>A client or adapter built for an external system.</dd>
+            <dt>diagnostic</dt><dd>The root cause and fix of a resolved bug or incident.</dd>
+            <dt>procedure</dt><dd>Steps for a non-obvious one-off task.</dd>
+            <dt>preference</dt><dd>A dev or tooling preference, not tied to one project.</dd>
+            <dt>snippet</dt><dd>A small reusable code or config example.</dd>
+          </dl>
+        </section>
+        <section>
+          <h3>Graph controls</h3>
+          <ul>
+            <li>Drag a node to reposition it.</li>
+            <li>Scroll to zoom, drag empty space to pan.</li>
+            <li>Click a node to open its entry.</li>
+            <li>Click a legend chip to filter by type — matches stay lit, others dim rather than disappear.</li>
+          </ul>
+        </section>
+        <section>
+          <h3>Search</h3>
+          <ul>
+            <li>Results are ranked by relevance, fusing keyword and semantic (meaning-based) match.</li>
+          </ul>
+        </section>
+      </div>
+      <div class="legend-row">
+        <button id="btn-help" type="button" aria-label="Help: entry types and graph controls" aria-haspopup="dialog" aria-expanded="false" aria-controls="help-popover">?</button>
+        <div id="legend" role="group" aria-label="Filter by type"></div>
+      </div>
+    </div>
   </div>
   <div id="panel">
-    <button id="panel-close" aria-label="Close panel">&times;</button>
-    <div id="empty-hint">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/>
-        <path d="M8 7.2 10.5 16M16 7.2 13.5 16"/>
-      </svg>
-      <p>Click a node to view or edit its entry, or start a new one.</p>
+    <div id="panel-content">
+      <button id="panel-close" aria-label="Close panel">&times;</button>
+      <div id="empty-hint">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/>
+          <path d="M8 7.2 10.5 16M16 7.2 13.5 16"/>
+        </svg>
+        <p>Click a node to view or edit its entry, or start a new one.</p>
+      </div>
     </div>
   </div>
 </div>
 <div id="toasts" aria-live="polite"></div>
+<div id="sr-announce" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
 <script>
 const $ = (sel) => document.querySelector(sel);
 const canvas = $("#graph");
 const ctx = canvas.getContext("2d");
 const panel = $("#panel");
+const panelContent = $("#panel-content");
+function swapPanelContent(html) {
+  panelContent.innerHTML = html;
+  panelContent.classList.remove("content-enter");
+  void panelContent.offsetWidth;
+  panelContent.classList.add("content-enter");
+}
 const legend = $("#legend");
 const spinner = $("#spinner");
 const searchInput = $("#search-q");
@@ -379,12 +500,25 @@ function dismissToast(el) {
   el.addEventListener("animationend", () => el.remove(), { once: true });
 }
 
+// The backend returns {"detail": "..."} on errors (see CLAUDE.md); surface that
+// verbatim when present, since it's already a specific, human-readable cause.
+async function apiErrorMessage(res, fallback) {
+  try {
+    const data = await res.json();
+    if (data && data.detail) return data.detail;
+  } catch {}
+  return fallback;
+}
+function networkErrorMessage(action) {
+  return `Can't reach the dashboard server to ${action}. Check that it's running and try again.`;
+}
+
 async function loadGraph() {
   spinner.classList.add("visible");
   const includeSuperseded = $("#include-superseded").checked;
   try {
     const res = await fetch(`/api/graph?include_superseded=${includeSuperseded}`);
-    if (!res.ok) throw new Error(`Graph request failed (${res.status})`);
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `The server couldn't load the graph (error ${res.status}). Try again in a moment.`));
     const data = await res.json();
     const existing = new Map(nodes.map(n => [n.id, n]));
     nodes = data.nodes.map(n => {
@@ -401,7 +535,7 @@ async function loadGraph() {
     renderLegend();
     refreshFilters();
   } catch (err) {
-    showToast(err.message || "Failed to load graph");
+    showToast(err instanceof TypeError ? networkErrorMessage("load the graph") : (err.message || "The graph failed to load. Try again."));
   } finally {
     spinner.classList.remove("visible");
   }
@@ -458,24 +592,25 @@ async function runSearch(query) {
   searchResultsEl.innerHTML = `<div class="search-status">Searching…</div>`;
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=20`);
-    if (!res.ok) throw new Error(`Search failed (${res.status})`);
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `Search failed (error ${res.status}). Try again.`));
     const data = await res.json();
-    renderSearchResults(data.results);
+    renderSearchResults(data.results, query);
     searchMatchIds = new Set(data.results.map(r => r.id));
     searchScores = new Map(data.results.map(r => [r.id, r.score]));
     computeHighlight();
   } catch (err) {
-    searchResultsEl.innerHTML = `<div class="search-status">${escapeHtml(err.message || "Search failed")}</div>`;
+    const message = err instanceof TypeError ? networkErrorMessage("search") : (err.message || "Search failed. Try again.");
+    searchResultsEl.innerHTML = `<div class="search-status">${escapeHtml(message)}</div>`;
     searchMatchIds = null;
     searchScores = new Map();
     computeHighlight();
   }
 }
 
-function renderSearchResults(results) {
+function renderSearchResults(results, query) {
   searchActiveIndex = -1;
   if (!results.length) {
-    searchResultsEl.innerHTML = `<div class="search-status">No matches.</div>`;
+    searchResultsEl.innerHTML = `<div class="search-status">No matches for "${escapeHtml(query)}".</div>`;
     return;
   }
   searchResultsEl.innerHTML = results.map((r, i) => `
@@ -550,22 +685,72 @@ searchInput.addEventListener("keydown", (ev) => {
 });
 document.addEventListener("click", (ev) => {
   if (!ev.target.closest(".search-wrap")) closeSearchResults();
+  if (!ev.target.closest("#legend-wrap")) closeHelpPopover();
+});
+
+const btnHelp = $("#btn-help");
+const helpPopover = $("#help-popover");
+function toggleHelpPopover() {
+  if (helpPopover.classList.contains("open")) closeHelpPopover(); else openHelpPopover();
+}
+function openHelpPopover() {
+  helpPopover.hidden = false;
+  requestAnimationFrame(() => helpPopover.classList.add("open"));
+  btnHelp.setAttribute("aria-expanded", "true");
+}
+function closeHelpPopover() {
+  if (!helpPopover.classList.contains("open")) return;
+  helpPopover.classList.remove("open");
+  btnHelp.setAttribute("aria-expanded", "false");
+  helpPopover.addEventListener("transitionend", () => {
+    if (!helpPopover.classList.contains("open")) helpPopover.hidden = true;
+  }, { once: true });
+}
+btnHelp.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  toggleHelpPopover();
 });
 let visibleNodes = [], visibleEdges = [];
 $("#filter-tag").addEventListener("input", computeHighlight);
 $("#include-superseded").addEventListener("change", loadGraph);
 
+function tierOf(id) {
+  if (!highlightIds) return "normal";
+  if (highlightIds.has(id)) return "match";
+  if (neighborIds.has(id)) return "neighbor";
+  return "unrelated";
+}
+
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+function stepMotion(n) {
+  const radiusLerp = reducedMotion.matches ? 1 : 0.25;
+  const alphaLerp = reducedMotion.matches ? 1 : 0.18;
+  for (const node of n) {
+    const isSelected = node.id === selectedId;
+    const isHovered = node === hoveredNode;
+    const targetR = isSelected ? 9 : (isHovered ? 8 : 7);
+    node._r = node._r == null ? targetR : node._r + (targetR - node._r) * radiusLerp;
+
+    const tier = tierOf(node.id);
+    const targetAlpha = tier === "unrelated" ? 0.35 : tier === "neighbor" ? 0.6 : (isHovered && !isSelected ? 0.85 : 1);
+    node._alpha = node._alpha == null ? targetAlpha : node._alpha + (targetAlpha - node._alpha) * alphaLerp;
+  }
+}
+
 function step() {
   const n = visibleNodes;
-  const REPULSION = 2900, SPRING = 0.018, SPRING_LEN = 160, DAMPING = 0.85, CENTER = 0.0014;
+  stepMotion(n);
+  const REPULSION = 4600, SPRING = 0.018, SPRING_LEN = 220, DAMPING = 0.85, CENTER = 0.0014;
   const ISOLATION_BOOST = 2.4;
+  const ISOLATED_PAIR_BOOST = 4.5;
   for (let i = 0; i < n.length; i++) {
     let fx = -n[i].x * CENTER, fy = -n[i].y * CENTER;
     for (let j = 0; j < n.length; j++) {
       if (i === j) continue;
       const dx = n[i].x - n[j].x, dy = n[i].y - n[j].y;
       const distSq = Math.max(dx * dx + dy * dy, 25);
-      const boost = n[i].isolated !== n[j].isolated ? ISOLATION_BOOST : 1;
+      const boost = (n[i].isolated && n[j].isolated) ? ISOLATED_PAIR_BOOST
+        : (n[i].isolated !== n[j].isolated) ? ISOLATION_BOOST : 1;
       const f = (REPULSION * boost) / distSq;
       fx += (dx / Math.sqrt(distSq)) * f;
       fy += (dy / Math.sqrt(distSq)) * f;
@@ -593,6 +778,19 @@ function step() {
   }
 }
 
+// Screen-space rect (post pan/zoom) for a world-space box, used to keep
+// text labels from stacking on top of each other on small/dense graphs.
+function worldRectToScreen(wx, wy, width, height) {
+  const w = canvas.width, h = canvas.height;
+  const scale = zoom * devicePixelRatio;
+  const cx = wx * scale + w / 2 + panX;
+  const cy = wy * scale + h / 2 + panY;
+  return { x1: cx - (width * scale) / 2, y1: cy - (height * scale) / 2, x2: cx + (width * scale) / 2, y2: cy + (height * scale) / 2 };
+}
+function rectsOverlap(a, b) {
+  return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+}
+
 function draw() {
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
@@ -603,12 +801,6 @@ function draw() {
   const byId = new Map(visibleNodes.map(node => [node.id, node]));
   const GRAY_NEIGHBOR = "#7a7f92";
   const GRAY_UNRELATED = "#4a4e5c";
-  const tierOf = (id) => {
-    if (!highlightIds) return "normal";
-    if (highlightIds.has(id)) return "match";
-    if (neighborIds.has(id)) return "neighbor";
-    return "unrelated";
-  };
 
   ctx.lineWidth = 1 / zoom;
   for (const e of visibleEdges) {
@@ -624,65 +816,97 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
+  // Node circles first (always drawn), independent of label placement.
+  for (const node of visibleNodes) {
+    const isSelected = node.id === selectedId;
+    const isHovered = node === hoveredNode;
+    const tier = tierOf(node.id);
+    const r = node._r ?? (isSelected ? 9 : (isHovered ? 8 : 7));
+    const alpha = node._alpha ?? 1;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = tier === "unrelated" ? GRAY_UNRELATED : tier === "neighbor" ? GRAY_NEIGHBOR : colorForType(node.type);
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (isSelected) {
+      ctx.lineWidth = 2 / zoom;
+      ctx.strokeStyle = "#6ea8fe";
+      ctx.globalAlpha = alpha;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Text labels (node titles + edge relation names) share one collision
+  // budget: higher-priority labels claim screen space first, lower-priority
+  // ones are skipped rather than drawn on top of each other. This is what
+  // keeps a dense/small graph legible instead of "стёкшимся" text.
+  const placedRects = [];
+  const tryPlace = (wx, wy, width, height) => {
+    const rect = worldRectToScreen(wx, wy, width, height);
+    for (const r of placedRects) if (rectsOverlap(rect, r)) return false;
+    placedRects.push(rect);
+    return true;
+  };
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  const nodeLabelJobs = visibleNodes
+    .filter(node => (node._alpha ?? 1) > 0.4)
+    .sort((a, b) => {
+      const rank = (n) => n.id === selectedId ? 0 : n === hoveredNode ? 1 : tierOf(n.id) === "match" ? 2 : tierOf(n.id) === "neighbor" ? 4 : 3;
+      return rank(a) - rank(b);
+    });
+  for (const node of nodeLabelJobs) {
+    const isSelected = node.id === selectedId;
+    const isHovered = node === hoveredNode;
+    const tier = tierOf(node.id);
+    const r = node._r ?? (isSelected ? 9 : (isHovered ? 8 : 7));
+    const alpha = node._alpha ?? 1;
+    const fontSize = (isHovered ? 13 : 12) / zoom;
+    ctx.font = `${fontSize}px sans-serif`;
+    const textWidth = ctx.measureText(node.title).width;
+    const labelX = node.x + r + 4 + textWidth / 2;
+    const labelY = node.y + 4 - fontSize * 0.32;
+    if (!isSelected && !isHovered && !tryPlace(labelX, labelY, textWidth, fontSize * 1.1)) continue;
+    ctx.globalAlpha = Math.min(1, (alpha - 0.4) / 0.6);
+    ctx.fillStyle = tier === "neighbor" ? "#9a9eae" : "#c7cbdb";
+    ctx.fillText(node.title, node.x + r + 4, node.y + 4);
+    if (tier === "match" && searchScores.has(node.id)) {
+      ctx.fillStyle = "#6ea8fe";
+      ctx.font = `${10 / zoom}px sans-serif`;
+      ctx.fillText(searchScores.get(node.id).toFixed(3), node.x + r + 8 / zoom + textWidth, node.y + 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `${11 / zoom}px sans-serif`;
-  for (const e of visibleEdges) {
-    const a = byId.get(e.source_id), b = byId.get(e.target_id);
-    if (!a || !b || !e.type) continue;
+  const edgeLabelJobs = visibleEdges
+    .map(e => ({ e, a: byId.get(e.source_id), b: byId.get(e.target_id) }))
+    .filter(({ e, a, b }) => a && b && e.type)
+    .filter(({ a, b }) => tierOf(a.id) !== "unrelated" || tierOf(b.id) !== "unrelated")
+    .sort((x, y) => {
+      const rank = ({ a, b }) => (tierOf(a.id) === "match" && tierOf(b.id) === "match") ? 0 : 1;
+      return rank(x) - rank(y);
+    });
+  for (const { e, a, b } of edgeLabelJobs) {
     const ta = tierOf(a.id), tb = tierOf(b.id);
-    if (ta === "unrelated" && tb === "unrelated") continue;
     const dx = b.x - a.x, dy = b.y - a.y;
     if (Math.sqrt(dx * dx + dy * dy) * zoom < 60) continue;
-    ctx.globalAlpha = !highlightIds ? 1 : (ta === "match" && tb === "match") ? 1 : 0.3;
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     const textWidth = ctx.measureText(e.type).width;
     const padX = 5 / zoom, padY = 3 / zoom;
+    if (!tryPlace(mx, my, textWidth + padX * 2, 14 / zoom + padY * 2)) continue;
+    ctx.globalAlpha = !highlightIds ? 1 : (ta === "match" && tb === "match") ? 1 : 0.3;
     ctx.fillStyle = "#14161c";
     ctx.fillRect(mx - textWidth / 2 - padX, my - 7 / zoom - padY, textWidth + padX * 2, 14 / zoom + padY * 2);
     ctx.fillStyle = "#8f93a6";
     ctx.fillText(e.type, mx, my);
   }
   ctx.globalAlpha = 1;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-
-  for (const node of visibleNodes) {
-    const isSelected = node.id === selectedId;
-    const isHovered = node === hoveredNode;
-    const tier = tierOf(node.id);
-    ctx.beginPath();
-    const r = isSelected ? 9 : (isHovered ? 8 : 7);
-    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-    if (tier === "unrelated") {
-      ctx.fillStyle = GRAY_UNRELATED;
-      ctx.globalAlpha = 0.35;
-    } else if (tier === "neighbor") {
-      ctx.fillStyle = GRAY_NEIGHBOR;
-      ctx.globalAlpha = 0.6;
-    } else {
-      ctx.fillStyle = colorForType(node.type);
-      ctx.globalAlpha = isHovered && !isSelected ? 0.85 : 1;
-    }
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    if (isSelected) {
-      ctx.lineWidth = 2 / zoom;
-      ctx.strokeStyle = "#6ea8fe";
-      ctx.stroke();
-    }
-    if (tier !== "unrelated") {
-      ctx.fillStyle = tier === "neighbor" ? "#9a9eae" : "#c7cbdb";
-      ctx.font = `${(isHovered ? 13 : 12) / zoom}px sans-serif`;
-      ctx.fillText(node.title, node.x + r + 4, node.y + 4);
-      if (tier === "match" && searchScores.has(node.id)) {
-        const titleWidth = ctx.measureText(node.title).width;
-        ctx.fillStyle = "#6ea8fe";
-        ctx.font = `${10 / zoom}px sans-serif`;
-        ctx.fillText(searchScores.get(node.id).toFixed(3), node.x + r + 8 / zoom + titleWidth, node.y + 4);
-      }
-    }
-  }
   ctx.restore();
 }
 
@@ -760,7 +984,7 @@ function openPanel() {
 function closePanel() {
   panel.classList.remove("open");
   selectedId = null;
-  panel.innerHTML = `
+  swapPanelContent(`
     <button id="panel-close" aria-label="Close panel">&times;</button>
     <div id="empty-hint">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -768,7 +992,7 @@ function closePanel() {
         <path d="M8 7.2 10.5 16M16 7.2 13.5 16"/>
       </svg>
       <p>Click a node to view or edit its entry, or start a new one.</p>
-    </div>`;
+    </div>`);
   $("#panel-close").addEventListener("click", closePanel);
 }
 
@@ -776,12 +1000,16 @@ async function openEntry(id) {
   selectedId = id;
   try {
     const res = await fetch(`/api/entries/${id}`);
-    if (!res.ok) throw new Error("Entry not found");
+    if (!res.ok) {
+      throw new Error(res.status === 404
+        ? "This entry no longer exists — it may have been deleted."
+        : await apiErrorMessage(res, `Couldn't load this entry (error ${res.status}). Try again.`));
+    }
     const entry = await res.json();
     renderForm(entry);
     openPanel();
   } catch (err) {
-    showToast(err.message || "Failed to load entry");
+    showToast(err instanceof TypeError ? networkErrorMessage("load this entry") : (err.message || "Couldn't load this entry. Try again."));
   }
 }
 
@@ -795,14 +1023,16 @@ function renderForm(entry) {
   const isNew = !entry.id;
   const tagsStr = (entry.tags || []).join(", ");
   const relations = entry.relations || { out: [], in: [] };
-  panel.innerHTML = `
+  swapPanelContent(`
     <button id="panel-close" aria-label="Close panel">&times;</button>
     <h2>${isNew ? "New entry" : "Edit entry"}</h2>
     ${entry.superseded_by ? `<div class="pill pill-danger">superseded</div>` : ""}
     <label for="f-title">Title</label>
-    <input id="f-title" type="text" value="${escapeAttr(entry.title || "")}">
+    <input id="f-title" type="text" value="${escapeAttr(entry.title || "")}" aria-describedby="err-f-title">
+    <div id="err-f-title" class="field-error" role="alert"></div>
     <label for="f-type">Type</label>
-    <input id="f-type" type="text" value="${escapeAttr(entry.type || "")}">
+    <input id="f-type" type="text" value="${escapeAttr(entry.type || "")}" aria-describedby="err-f-type">
+    <div id="err-f-type" class="field-error" role="alert"></div>
     <label for="f-tags">Tags (comma-separated)</label>
     <input id="f-tags" type="text" value="${escapeAttr(tagsStr)}">
     <label for="f-resource">Resource</label>
@@ -819,11 +1049,28 @@ function renderForm(entry) {
     ${entry.id ? `<div id="meta">id: ${entry.id}${entry.last_modified ? " · " + entry.last_modified : ""}</div>` : ""}
     ${renderRelList("Links to", relations.out)}
     ${renderRelList("Linked from", relations.in)}
-  `;
+  `);
   $("#panel-close").addEventListener("click", closePanel);
   $("#btn-save").addEventListener("click", () => saveEntry(entry.id));
+  $("#f-title").addEventListener("input", () => clearFieldError("f-title"));
+  $("#f-type").addEventListener("input", () => clearFieldError("f-type"));
   const delBtn = $("#btn-delete");
   if (delBtn) delBtn.addEventListener("click", () => handleDeleteClick(delBtn, entry.id));
+}
+
+function showFieldError(fieldId, message) {
+  $(`#${fieldId}`)?.setAttribute("aria-invalid", "true");
+  const err = $(`#err-${fieldId}`);
+  if (err) err.textContent = message;
+}
+function clearFieldError(fieldId) {
+  $(`#${fieldId}`)?.removeAttribute("aria-invalid");
+  const err = $(`#err-${fieldId}`);
+  if (err) err.textContent = "";
+}
+
+function announce(message) {
+  $("#sr-announce").textContent = message;
 }
 
 let confirmTimer = null;
@@ -831,9 +1078,11 @@ function handleDeleteClick(btn, entryId) {
   if (!btn.classList.contains("confirming")) {
     btn.classList.add("confirming");
     btn.textContent = "Confirm delete?";
+    announce("Confirm delete? Click Delete again within 4 seconds, or it cancels automatically.");
     confirmTimer = setTimeout(() => {
       btn.classList.remove("confirming");
       btn.textContent = "Delete";
+      announce("Delete canceled.");
     }, 4000);
     return;
   }
@@ -849,13 +1098,24 @@ function escapeAttr(s) {
 }
 
 async function saveEntry(entryId) {
+  const title = $("#f-title").value.trim();
+  const entryType = $("#f-type").value.trim();
+  clearFieldError("f-title");
+  clearFieldError("f-type");
+  if (!title) showFieldError("f-title", "Title is required.");
+  if (!entryType) showFieldError("f-type", "Type is required.");
+  if (!title || !entryType) {
+    (!title ? $("#f-title") : $("#f-type")).focus();
+    return;
+  }
+
   const btn = $("#btn-save");
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Saving…";
   const body = {
-    title: $("#f-title").value.trim(),
-    entry_type: $("#f-type").value.trim(),
+    title,
+    entry_type: entryType,
     tags: $("#f-tags").value.split(",").map(t => t.trim()).filter(Boolean),
     resource: $("#f-resource").value.trim(),
     content: $("#f-content").value,
@@ -870,12 +1130,12 @@ async function saveEntry(entryId) {
       body: JSON.stringify(body),
     });
     const result = await res.json();
-    if (!res.ok) throw new Error(result.detail || "Save failed");
+    if (!res.ok) throw new Error(result.detail || `Couldn't save this entry (error ${res.status}). Try again.`);
     showToast(entryId ? "Entry saved" : "Entry created", "success");
     await loadGraph();
     await openEntry(result.id);
   } catch (err) {
-    showToast(err.message || "Save failed");
+    showToast(err instanceof TypeError ? networkErrorMessage("save this entry") : (err.message || "Couldn't save this entry. Try again."));
     btn.disabled = false;
     btn.textContent = original;
   }
@@ -884,12 +1144,12 @@ async function saveEntry(entryId) {
 async function deleteEntry(entryId) {
   try {
     const res = await fetch(`/api/entries/${entryId}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("Delete failed");
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `Couldn't delete this entry (error ${res.status}). Try again.`));
     showToast("Entry deleted", "success");
     closePanel();
     await loadGraph();
   } catch (err) {
-    showToast(err.message || "Delete failed");
+    showToast(err instanceof TypeError ? networkErrorMessage("delete this entry") : (err.message || "Couldn't delete this entry. Try again."));
   }
 }
 
@@ -901,7 +1161,9 @@ $("#btn-new").addEventListener("click", () => {
 $("#panel-close").addEventListener("click", closePanel);
 
 window.addEventListener("keydown", (ev) => {
-  if (ev.key === "Escape" && isMobile() && panel.classList.contains("open")) closePanel();
+  if (ev.key !== "Escape") return;
+  if (!helpPopover.hidden) { closeHelpPopover(); return; }
+  if (isMobile() && panel.classList.contains("open")) closePanel();
 });
 
 resize();

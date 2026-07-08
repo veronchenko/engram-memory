@@ -24,8 +24,16 @@ personal, global config edited directly, not a distributable repo artifact.
   project's hub entry. Same caveat: the live copy Claude Code actually loads
   is under `~/.claude/agents/`, not here.
 
-Three hooks, defined in `hooks.json`:
+Four hooks, defined in `hooks.json`:
 
+- **`PreToolUse`** (`engram_remember_gate.py`, matcher
+  `mcp__engram__search|mcp__engram__recall|mcp__engram__remember`) — enforces
+  "search before remember" mechanically instead of relying on the model to
+  self-police it. On `search`/`recall` it stamps a per-session marker file in
+  the system temp dir (`engram_searched_<session_id>.txt`); on `remember` it
+  checks that marker and denies the call (`permissionDecision: "deny"`) if
+  it's missing, telling the model to search first. Session-level gate — any
+  prior search/recall in the session satisfies it, regardless of topic.
 - **`SessionStart`** (`engram_session_start.py`) — fires once per new
   session, unconditionally reminds to search Engram
   (`mcp__engram__search`/`recall`) before starting work, per the "When to
@@ -47,13 +55,14 @@ Three hooks, defined in `hooks.json`:
   control on this event (can't block exit, can't message Claude) — purely
   cleanup.
 
-All three hooks are plain Python command scripts (`type: "command"`), not
+All four hooks are plain Python command scripts (`type: "command"`), not
 `type: "prompt"` hooks — `SessionStart` and `SessionEnd` aren't in Claude
-Code's prompt-hook-supported event list, and `Stop` needs persisted state
-(the per-session stop counter) that a stateless prompt hook can't keep. The
-counter is stored per `session_id` in a small file under the system temp
-dir (`engram_stop_count_<session_id>.txt`) since each hook invocation is a
-fresh process with no memory of prior calls. Override the interval with the
+Code's prompt-hook-supported event list, and `Stop`/`PreToolUse` need
+persisted state (the per-session stop counter, the per-session search
+marker) that a stateless prompt hook can't keep. Both state files live
+under the system temp dir (`engram_stop_count_<session_id>.txt`,
+`engram_searched_<session_id>.txt`) since each hook invocation is a fresh
+process with no memory of prior calls. Override the Stop interval with the
 `ENGRAM_STOP_INTERVAL` environment variable.
 
 ## Wiring
@@ -83,7 +92,7 @@ If any script here changes location or is renamed, update the matching
    `engram` MCP server (`claude mcp add ... -v <path>:/knowledge ...`, see
    the main repo README's Quick Start). Without this, `search`/`remember`
    calls the hooks prompt for will fail against an unconfigured server.
-3. Open `~/.claude/settings.json` and merge the three handlers below into its
+3. Open `~/.claude/settings.json` and merge the four handlers below into its
    `hooks` key (create the key if it doesn't exist yet). Use the **literal
    absolute path** to each script — `${CLAUDE_PLUGIN_ROOT}` only resolves
    inside a plugin, not in global `settings.json`:
@@ -91,6 +100,12 @@ If any script here changes location or is renamed, update the matching
    ```json
    {
      "hooks": {
+       "PreToolUse": [
+         { "matcher": "mcp__engram__search|mcp__engram__recall|mcp__engram__remember",
+           "hooks": [
+             { "type": "command", "command": "python \"C:/Users/<user>/.claude/hooks/engram_remember_gate.py\"", "timeout": 5 }
+           ] }
+       ],
        "SessionStart": [
          { "hooks": [
            { "type": "command", "command": "python \"C:/Users/<user>/.claude/hooks/engram_session_start.py\"", "timeout": 10 }
@@ -110,10 +125,13 @@ If any script here changes location or is renamed, update the matching
    }
    ```
 
-   If `SessionStart`/`Stop`/`SessionEnd` already have handlers (e.g. an
-   existing `Stop` → `engram rebuild` MCP tool entry), **append** to that
-   event's `hooks` array — don't replace it. Multiple handlers on the same
-   event all run.
+   If `PreToolUse`/`SessionStart`/`Stop`/`SessionEnd` already have handlers
+   (e.g. an existing `Stop` → `engram rebuild` MCP tool entry, or another
+   `PreToolUse` matcher like `rtk hook claude`), **append** to that event's
+   `hooks` array — don't replace it. Multiple handlers on the same event all
+   run; a `PreToolUse` matcher only applies to tool names it matches, so an
+   existing broader/different matcher and this one coexist as separate array
+   entries.
 4. Make sure `~/.claude/ENGRAM_MEMORY.md` exists and is `@`-imported from
    `~/.claude/CLAUDE.md` — the hook prompts assume those rules are the ones
    in force and are kept in sync with them.
@@ -136,8 +154,11 @@ If any script here changes location or is renamed, update the matching
 7. Restart/start a new Claude Code session — `SessionStart` fires once per
    new session, so an already-running session won't pick up the change.
 8. Sanity check: start a session and confirm `hooks/logs/debug.log` gets a
-   `session_start` line; end the session and confirm the matching
-   `engram_stop_count_<session_id>.txt` temp file is gone afterward.
+   `session_start` line; call `remember` before ever calling `search`/`recall`
+   and confirm it's denied; call `search` and retry `remember` and confirm it
+   now succeeds; end the session and confirm both
+   `engram_stop_count_<session_id>.txt` and `engram_searched_<session_id>.txt`
+   temp files are gone afterward.
 
 No entry in `settings.json` currently references `hooks.json` in this
 folder — it's kept only as a readable reference of what the merged config
