@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- feat: entries support optional `type`, `resource` frontmatter fields
+- feat: `remember` accepts `entry_type`, `resource` params to set them
+- feat: `search`/`list`/`recall` surface `type` in results
+- feat: `type` is filterable in the Xapian backend (`type:` prefix); indexed as a boolean term in both backends
+- feat: `rebuild` now returns schema conformance warnings (missing type, malformed resource)
+- Backward compatible: existing entries without new fields continue to work unchanged
+
 ## 0.6.0
 
 - feat: `remember` docstring enforces one decision per article with optional justification

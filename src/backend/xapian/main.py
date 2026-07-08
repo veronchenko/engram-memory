@@ -24,6 +24,7 @@ logger = logging.getLogger("engram")
 PREFIX_ID: str = "Q"
 PREFIX_TITLE: str = "XTITLE"
 PREFIX_TAG: str = "XTAG"
+PREFIX_TYPE: str = "XTYPE"
 PREFIX_RELOUT: str = "XRELOUT:"
 PREFIX_RELTGT: str = "XRELTGT:"
 
@@ -120,6 +121,13 @@ class XapianBackend(SearchBackend):
             doc.add_boolean_term(f"{PREFIX_TAG}{tag}")
             tg.index_text(tag, 1)
 
+        # Index type (filterable boolean term + free-text match)
+        entry_type = entry.get("type", "")
+        if entry_type:
+            type_value = entry_type.lower().strip()
+            doc.add_boolean_term(f"{PREFIX_TYPE}{type_value}")
+            tg.index_text(type_value, 1)
+
         # Index content
         tg.increase_termpos()
         tg.index_text(entry["content"], 1)
@@ -203,6 +211,7 @@ class XapianBackend(SearchBackend):
         # Allow prefix searches
         qp.add_prefix("title", PREFIX_TITLE)
         qp.add_prefix("tag", PREFIX_TAG)
+        qp.add_prefix("type", PREFIX_TYPE)
 
         flags = qp.FLAG_DEFAULT | qp.FLAG_SPELLING_CORRECTION | qp.FLAG_WILDCARD
         query = qp.parse_query(query_str, flags)

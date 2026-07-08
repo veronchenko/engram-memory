@@ -155,7 +155,7 @@ def register_tools(
             limit: Maximum results to return (default: 10).
 
         Returns:
-            Dict with results list (id, title, tags, snippet, score).
+            Dict with results list (id, title, tags, type, snippet, score).
         """
 
         # Clamp limit to valid range
@@ -181,6 +181,7 @@ def register_tools(
 
         Returns:
             Dict with id, title, tags, content, relations — or error if not found.
+            Also includes 'type', 'resource' when set on the entry.
             Relations has 'out' and 'in' lists, each with type, id, title.
         """
 
@@ -210,8 +211,10 @@ def register_tools(
         title: str,
         content: str,
         tags: list[str],
+        entry_type: str,
         entry_id: str | None = None,
         force: bool = False,
+        resource: str = "",
     ) -> dict:
         """
         Store or update a knowledge base entry (upsert).
@@ -247,8 +250,13 @@ def register_tools(
             title: Entry title.
             content: Entry body (Markdown).
             tags: List of tags for categorization.
+            entry_type: Required classification (e.g. hub, decision,
+                diagnostic, procedure, preference, snippet). Filterable
+                via search (type:<value>), separate from tags.
             entry_id: Optional UUID of an existing entry to update.
             force: Skip duplicate detection and always create new.
+            resource: Optional canonical URI for the underlying asset
+                the entry describes (e.g. a repo path or service URL).
 
         Returns:
             Dict with id, title, and action ('created' or 'updated').
@@ -262,7 +270,15 @@ def register_tools(
             force,
         )
 
-        result = kb.remember(title, content, tags, entry_id=entry_id, force=force)
+        result = kb.remember(
+            title,
+            content,
+            tags,
+            entry_type,
+            entry_id=entry_id,
+            force=force,
+            resource=resource,
+        )
 
         # Add size metadata and atomicity warnings
         if "error" not in result:
@@ -342,7 +358,7 @@ def register_tools(
             limit: Maximum entries to return (default: 50).
 
         Returns:
-            Dict with entries list (id, title, tags).
+            Dict with entries list (id, title, tags, type).
         """
 
         # Clamp limit to valid range
@@ -374,22 +390,34 @@ def register_tools(
     @mcp.tool()
     def rebuild() -> dict:
         """
-        Rebuild the Xapian search index from Markdown files.
+        Rebuild the search index from Markdown files.
 
         Deletes the existing index and reindexes all entries. Use this
-        if the index is corrupted or after manual file changes.
+        if the index is corrupted or after manual file changes. Also runs
+        a non-blocking schema conformance check over all entries.
 
         Returns:
-            Dict with number of entries indexed.
+            Dict with number of entries indexed, and 'schema_warnings'
+            (per-kind counts for missing_type, malformed_resource) when
+            any entries are flagged.
         """
 
         logger.info("rebuild: starting full rebuild")
 
-        count = kb.rebuild()
+        result = kb.rebuild()
+        count = result["count"]
+
+        response: dict = {"success": True, "entries_indexed": count}
+
+        warnings = result.get("warnings", {})
+        if any(warnings.values()):
+            response["schema_warnings"] = {
+                kind: len(ids) for kind, ids in warnings.items() if ids
+            }
 
         logger.info("rebuild: complete — %d entries", count)
         # Rebuild done
-        return {"success": True, "entries_indexed": count}
+        return response
 
 
 # ---------------------------------------------------------------------------

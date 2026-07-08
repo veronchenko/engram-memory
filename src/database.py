@@ -125,12 +125,19 @@ class KnowledgeBase:
                 self._meta_cache[entry["id"]] = {
                     "title": entry["title"],
                     "tags": entry["tags"],
+                    "type": entry.get("type", ""),
                 }
 
         # Cache loaded
         logger.info("Metadata cache loaded: %d entries", len(self._meta_cache))
 
-    def _update_meta_cache(self, entry_id: str, title: str, tags: list[str]) -> None:
+    def _update_meta_cache(
+        self,
+        entry_id: str,
+        title: str,
+        tags: list[str],
+        entry_type: str = "",
+    ) -> None:
         """
         Update or insert a single entry in the metadata cache.
 
@@ -138,10 +145,15 @@ class KnowledgeBase:
             entry_id: UUID of the entry.
             title: Entry title.
             tags: Normalized tag list.
+            entry_type: Entry classification (e.g. hub, decision, diagnostic).
         """
 
         # Upsert cache entry
-        self._meta_cache[entry_id] = {"title": title, "tags": tags}
+        self._meta_cache[entry_id] = {
+            "title": title,
+            "tags": tags,
+            "type": entry_type,
+        }
 
     def _remove_from_meta_cache(self, entry_id: str) -> None:
         """
@@ -202,6 +214,8 @@ class KnowledgeBase:
             "id": str(meta.get("id", "")),
             "title": str(meta.get("title", "")),
             "tags": _normalize_tags(meta.get("tags", [])),
+            "type": str(meta.get("type", "")),
+            "resource": str(meta.get("resource", "")),
             "content": content,
         }
 
@@ -226,8 +240,19 @@ class KnowledgeBase:
         filepath = self._entries_path / f"{entry['id']}.md"
         tmp = filepath.with_suffix(".md.tmp")
 
+        fm_dict: dict[str, Any] = {
+            "id": entry["id"],
+            "title": entry["title"],
+            "tags": entry["tags"],
+        }
+        # Omit optional fields when empty so legacy-shaped entries stay legacy-shaped
+        if entry.get("type"):
+            fm_dict["type"] = entry["type"]
+        if entry.get("resource"):
+            fm_dict["resource"] = entry["resource"]
+
         frontmatter = yaml.dump(
-            {"id": entry["id"], "title": entry["title"], "tags": entry["tags"]},
+            fm_dict,
             default_flow_style=True,
             allow_unicode=True,
             sort_keys=False,
@@ -304,8 +329,10 @@ class KnowledgeBase:
         title: str,
         content: str,
         tags: list[str],
+        entry_type: str,
         entry_id: str | None = None,
         force: bool = False,
+        resource: str = "",
     ) -> dict[str, Any]:
         """
         Upsert an entry: update if it exists, create if it doesn't.
@@ -321,12 +348,21 @@ class KnowledgeBase:
             title: Entry title.
             content: Entry body (Markdown).
             tags: List of tags.
+            entry_type: Classification (e.g. hub, decision, diagnostic).
+                Required — every entry must declare its type.
             entry_id: Optional UUID of an existing entry to update.
             force: Skip duplicate detection and always create new.
+            resource: Optional canonical URI for the underlying asset.
 
         Returns:
-            Dict with id, title, and action ('created' or 'updated').
+            Dict with id, title, and action ('created' or 'updated'), or
+            an 'error' if entry_type is missing.
         """
+
+        if not entry_type or not entry_type.strip():
+            logger.warning("Remember rejected — entry_type is required")
+            # Missing required field
+            return {"error": "entry_type is required"}
 
         tags = _normalize_tags(tags)
 
@@ -346,10 +382,12 @@ class KnowledgeBase:
             existing["title"] = title
             existing["content"] = content
             existing["tags"] = tags
+            existing["type"] = entry_type
+            existing["resource"] = resource
 
             self._write_entry(existing)
             self._backend.index(existing)
-            self._update_meta_cache(entry_id, title, tags)
+            self._update_meta_cache(entry_id, title, tags, entry_type)
 
             logger.info("Updated entry %s: %s", entry_id, title)
             # Updated
@@ -366,10 +404,12 @@ class KnowledgeBase:
                     best_entry["title"] = title
                     best_entry["content"] = content
                     best_entry["tags"] = tags
+                    best_entry["type"] = entry_type
+                    best_entry["resource"] = resource
 
                     self._write_entry(best_entry)
                     self._backend.index(best_entry)
-                    self._update_meta_cache(best["id"], title, tags)
+                    self._update_meta_cache(best["id"], title, tags, entry_type)
 
                     logger.info(
                         "Updated existing entry %s (similarity %d%%): %s",
@@ -392,12 +432,14 @@ class KnowledgeBase:
             "id": entry_id,
             "title": title,
             "tags": tags,
+            "type": entry_type,
+            "resource": resource,
             "content": content,
         }
 
         self._write_entry(entry)
         self._backend.index(entry)
-        self._update_meta_cache(entry_id, title, tags)
+        self._update_meta_cache(entry_id, title, tags, entry_type)
 
         logger.info("Created new entry %s: %s", entry_id, title)
         # Entry created
@@ -588,7 +630,7 @@ class KnowledgeBase:
             limit: Maximum number of results.
 
         Returns:
-            List of dicts with id, title, tags, snippet, score.
+            List of dicts with id, title, tags, type, snippet, score.
         """
 
         # Normalize tags before passing to backend
@@ -612,6 +654,7 @@ class KnowledgeBase:
                         "id": entry["id"],
                         "title": entry["title"],
                         "tags": entry["tags"],
+                        "type": entry.get("type", ""),
                         "snippet": snippet,
                         "score": hit["score"],
                     }
@@ -621,15 +664,19 @@ class KnowledgeBase:
         # Search complete
         return results
 
-    def rebuild(self) -> int:
+    def rebuild(self) -> dict[str, Any]:
         """
         Rebuild the search index from all Markdown files.
 
         Reads all valid entry files, collects them, and passes the full
-        list to the backend for a single-pass rebuild.
+        list to the backend for a single-pass rebuild. Also runs a
+        lightweight schema conformance check (non-blocking) over the
+        collected entries.
 
         Returns:
-            Number of entries indexed.
+            Dict with 'count' (entries indexed) and 'warnings' — a dict
+            mapping warning kind ('missing_type', 'malformed_resource')
+            to a list of affected entry ids.
         """
 
         logger.info("Rebuilding index from %s", self._entries_path)
@@ -649,9 +696,21 @@ class KnowledgeBase:
         # Reload metadata cache to stay in sync
         self._load_meta_cache()
 
+        # Schema conformance check (non-blocking, informational only)
+        warnings: dict[str, list[str]] = {
+            "missing_type": [],
+            "malformed_resource": [],
+        }
+        for entry in entries:
+            if not entry.get("type"):
+                warnings["missing_type"].append(entry["id"])
+            resource = entry.get("resource", "").strip()
+            if resource and "://" not in resource and not resource.startswith("/"):
+                warnings["malformed_resource"].append(entry["id"])
+
         logger.info("Rebuild complete: %d entries indexed", count)
         # Rebuild done
-        return count
+        return {"count": count, "warnings": warnings}
 
     def find_similar(self, title: str, limit: int = 5) -> list[dict[str, Any]]:
         """
@@ -712,7 +771,7 @@ class KnowledgeBase:
             limit: Maximum number of entries.
 
         Returns:
-            List of dicts with id, title, tags.
+            List of dicts with id, title, tags, type.
         """
 
         filter_tags = set(_normalize_tags(tags)) if tags else None
@@ -728,6 +787,7 @@ class KnowledgeBase:
                     "id": entry_id,
                     "title": meta["title"],
                     "tags": meta["tags"],
+                    "type": meta.get("type", ""),
                 }
             )
 

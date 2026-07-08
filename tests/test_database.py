@@ -42,13 +42,14 @@ def _create_entry(
     tags: list[str] | None = None,
     *,
     force: bool = False,
+    entry_type: str = "snippet",
 ) -> dict:
     """Shorthand for creating an entry and asserting success."""
 
     if tags is None:
         tags = ["test"]
 
-    result = kb.remember(title, content, tags, force=force)
+    result = kb.remember(title, content, tags, entry_type, force=force)
     assert "error" not in result, f"Unexpected error: {result}"
     # Created or updated
     return result
@@ -65,7 +66,7 @@ class TestRememberAndGet:
     def test_remember_create(self, kb: KnowledgeBase) -> None:
         """New title with no existing entry creates a new entry."""
 
-        result = kb.remember("New Entry", "Body text.", ["infra"])
+        result = kb.remember("New Entry", "Body text.", ["infra"], "snippet")
 
         assert result["action"] == "created"
         assert result["title"] == "New Entry"
@@ -88,6 +89,7 @@ class TestRememberAndGet:
             "Updated Title",
             "Updated body.",
             ["updated"],
+            "snippet",
             entry_id=entry_id,
         )
 
@@ -105,16 +107,24 @@ class TestRememberAndGet:
         """Updating with a nonexistent entry_id returns an error."""
 
         fake_id = str(uuid.uuid4())
-        result = kb.remember("Title", "Content.", ["tag"], entry_id=fake_id)
+        result = kb.remember("Title", "Content.", ["tag"], "snippet", entry_id=fake_id)
 
         assert "error" in result
         assert fake_id in result["error"]
 
+    def test_remember_missing_type(self, kb: KnowledgeBase) -> None:
+        """Calling remember without entry_type returns an error."""
+
+        result = kb.remember("Title", "Content.", ["tag"], "")
+
+        assert "error" in result
+        assert "entry_type" in result["error"]
+
     def test_remember_upsert_by_title(self, kb: KnowledgeBase) -> None:
         """Calling remember twice with the same title updates the first entry."""
 
-        first = kb.remember("Duplicate Title", "First body.", ["v1"])
-        second = kb.remember("Duplicate Title", "Second body.", ["v2"])
+        first = kb.remember("Duplicate Title", "First body.", ["v1"], "snippet")
+        second = kb.remember("Duplicate Title", "Second body.", ["v2"], "snippet")
 
         assert first["action"] == "created"
         assert second["action"] == "updated"
@@ -131,7 +141,7 @@ class TestRememberAndGet:
         """force=True skips duplicate detection and creates a new entry."""
 
         first = _create_entry(kb, "Same Title", "First.")
-        second = kb.remember("Same Title", "Second.", ["tag"], force=True)
+        second = kb.remember("Same Title", "Second.", ["tag"], "snippet", force=True)
 
         assert second["action"] == "created"
         # Must be a different UUID
@@ -464,14 +474,44 @@ class TestRebuild:
         _create_entry(kb, "Alpha Entry", "Alpha content.", ["alpha"], force=True)
         _create_entry(kb, "Beta Entry", "Beta content.", ["beta"], force=True)
 
-        count = kb.rebuild()
+        result = kb.rebuild()
 
-        assert count == 2
+        assert result["count"] == 2
 
         # Search must still work after rebuild
         results = kb.search("alpha")
         assert len(results) >= 1
         assert results[0]["title"] == "Alpha Entry"
+
+    def test_rebuild_conformance_warnings(self, kb: KnowledgeBase) -> None:
+        """Rebuild flags legacy entries missing type, and bad resources."""
+
+        # Simulate a legacy entry predating the type requirement (bypasses
+        # remember()'s validation by writing the file directly)
+        legacy_id = str(uuid.uuid4())
+        kb._write_entry(
+            {
+                "id": legacy_id,
+                "title": "Legacy",
+                "tags": ["tag"],
+                "type": "",
+                "resource": "",
+                "content": "Legacy content.",
+            }
+        )
+        kb.remember(
+            "Bad Resource",
+            "Content.",
+            ["tag"],
+            "decision",
+            force=True,
+            resource="not-a-uri",
+        )
+
+        result = kb.rebuild()
+
+        assert len(result["warnings"]["missing_type"]) == 1
+        assert len(result["warnings"]["malformed_resource"]) == 1
 
 
 # ===========================================================================
@@ -516,7 +556,7 @@ class TestEdgeCases:
     def test_remember_empty_tags(self, kb: KnowledgeBase) -> None:
         """An empty tags list is accepted without errors."""
 
-        result = kb.remember("No Tags", "Content.", [])
+        result = kb.remember("No Tags", "Content.", [], "snippet")
 
         assert result["action"] == "created"
 
@@ -531,6 +571,7 @@ class TestEdgeCases:
             "Deploiement sur les serveurs — etat des lieux",
             "Contenu avec des accents : e, a, u.",
             ["infra"],
+            "snippet",
         )
 
         assert result["action"] == "created"
@@ -550,3 +591,114 @@ class TestEdgeCases:
 
         # Graceful failure
         assert entry is None
+
+
+# ===========================================================================
+# Extended schema — type / resource
+# ===========================================================================
+
+
+class TestExtendedSchema:
+    """Tests for the optional type/resource frontmatter fields."""
+
+    def test_remember_roundtrip_new_fields(self, kb: KnowledgeBase) -> None:
+        """type/resource set via remember round-trip through get."""
+
+        result = kb.remember(
+            "Hub Entry",
+            "Content.",
+            ["hub", "myproject"],
+            entry_type="hub",
+            resource="https://github.com/org/repo",
+        )
+
+        entry = kb.get(result["id"])
+        assert entry is not None
+        assert entry["type"] == "hub"
+        assert entry["resource"] == "https://github.com/org/repo"
+
+    def test_legacy_entry_backward_compat(
+        self, kb: KnowledgeBase, tmp_path: Path
+    ) -> None:
+        """A pre-existing file with only id/title/tags parses with empty defaults."""
+
+        entry_id = str(uuid.uuid4())
+        legacy_file = tmp_path / "entries" / f"{entry_id}.md"
+        legacy_file.write_text(
+            f"---\nid: {entry_id}\ntitle: Legacy Entry\ntags: [legacy]\n---\n\n"
+            "Legacy content.\n",
+            encoding="utf-8",
+        )
+
+        entry = kb._read_entry(legacy_file)
+
+        assert entry is not None
+        assert entry["type"] == ""
+        assert entry["resource"] == ""
+
+    def test_write_entry_omits_empty_resource(self, kb: KnowledgeBase) -> None:
+        """type is always written; resource is omitted from disk when empty."""
+
+        result = kb.remember("Plain Entry", "Content.", ["tag"], "snippet")
+
+        filepath = kb.entry_path(result["id"])
+        assert filepath is not None
+        text = filepath.read_text(encoding="utf-8")
+
+        assert "type: snippet" in text
+        assert "resource:" not in text
+
+    def test_remember_update_by_id_overwrites_new_fields(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """Updating by entry_id replaces type/resource like title/tags."""
+
+        created = kb.remember(
+            "Original",
+            "Body.",
+            ["tag"],
+            entry_type="decision",
+        )
+        entry_id = created["id"]
+
+        kb.remember(
+            "Updated",
+            "Body.",
+            ["tag"],
+            entry_id=entry_id,
+            entry_type="diagnostic",
+            resource="/local/path",
+        )
+
+        entry = kb.get(entry_id)
+        assert entry is not None
+        assert entry["type"] == "diagnostic"
+        assert entry["resource"] == "/local/path"
+
+    def test_list_entries_includes_new_fields(self, kb: KnowledgeBase) -> None:
+        """list_entries surfaces type."""
+
+        kb.remember(
+            "Listed Entry",
+            "Content.",
+            ["tag"],
+            entry_type="snippet",
+        )
+
+        entries = kb.list_entries()
+        assert len(entries) == 1
+        assert entries[0]["type"] == "snippet"
+
+    def test_search_includes_new_fields(self, kb: KnowledgeBase) -> None:
+        """search results surface type."""
+
+        kb.remember(
+            "Searchable Entry",
+            "Body content about xylophones.",
+            ["tag"],
+            entry_type="pattern",
+        )
+
+        results = kb.search("xylophones")
+        assert len(results) >= 1
+        assert results[0]["type"] == "pattern"

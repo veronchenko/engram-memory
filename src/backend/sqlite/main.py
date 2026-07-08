@@ -26,7 +26,9 @@ _SQL_CREATE_ENTRIES: str = """
 CREATE TABLE IF NOT EXISTS entries (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
-    tags TEXT NOT NULL  -- JSON array
+    tags TEXT NOT NULL,  -- JSON array
+    type TEXT DEFAULT '',
+    resource TEXT DEFAULT ''
 )
 """
 
@@ -139,14 +141,17 @@ class SQLiteBackend(SearchBackend):
         title = entry["title"]
         content = entry["content"]
         tags = entry["tags"]
+        entry_type = entry.get("type", "")
+        resource = entry.get("resource", "")
         tags_json = json.dumps(tags, ensure_ascii=False)
         # Flatten tags to a space-separated string for FTS indexing
         tags_text = " ".join(tags)
 
         # Upsert into entries table
         conn.execute(
-            "INSERT OR REPLACE INTO entries (id, title, tags) VALUES (?, ?, ?)",
-            (entry_id, title, tags_json),
+            "INSERT OR REPLACE INTO entries (id, title, tags, type, resource) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (entry_id, title, tags_json, entry_type, resource),
         )
 
         # Delete old FTS row if it exists (contentless FTS requires manual delete)

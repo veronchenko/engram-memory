@@ -90,6 +90,7 @@ class TestRememberEdgeCases:
             "Exploit",
             "Content.",
             ["test"],
+            "snippet",
             entry_id="../../../etc/passwd",
         )
 
@@ -106,6 +107,7 @@ class TestRememberEdgeCases:
             "Exploit",
             "Content.",
             ["test"],
+            "snippet",
             entry_id="not-a-valid-uuid",
         )
 
@@ -122,7 +124,7 @@ class TestSearchEdgeCases:
         _mcp, kb, _logger = _setup
 
         # Create an entry first so the index exists
-        kb.remember("Test Entry", "Some content.", ["test"])
+        kb.remember("Test Entry", "Some content.", ["test"], "snippet")
 
         results = kb.search("")
 
@@ -134,8 +136,8 @@ class TestSearchEdgeCases:
 
         _mcp, kb, _logger = _setup
 
-        kb.remember("Entry A", "Alpha content.", ["test"], force=True)
-        kb.remember("Entry B", "Beta content.", ["test"], force=True)
+        kb.remember("Entry A", "Alpha content.", ["test"], "snippet", force=True)
+        kb.remember("Entry B", "Beta content.", ["test"], "snippet", force=True)
 
         # Use limit=0 — should be clamped to 1 by server, but here we
         # test the KnowledgeBase directly (it accepts the value as-is)
@@ -179,7 +181,7 @@ class TestLimitClamping:
         _mcp, kb, _logger = _setup
 
         for i in range(5):
-            kb.remember(f"Entry {i:02d}", f"Body {i}.", ["test"], force=True)
+            kb.remember(f"Entry {i:02d}", f"Body {i}.", ["test"], "snippet", force=True)
 
         entries = kb.list_entries(limit=2)
 
@@ -191,7 +193,7 @@ class TestLimitClamping:
 
         _mcp, kb, _logger = _setup
 
-        kb.remember("Only Entry", "Solo.", ["test"])
+        kb.remember("Only Entry", "Solo.", ["test"], "snippet")
 
         entries = kb.list_entries(limit=500)
 
@@ -211,7 +213,7 @@ class TestMetaCache:
         """Cache is populated when KnowledgeBase is created."""
 
         kb = KnowledgeBase(str(tmp_path))
-        kb.remember("Cached Entry", "Content.", ["cache"])
+        kb.remember("Cached Entry", "Content.", ["cache"], "snippet")
 
         # Create a new KnowledgeBase on the same path
         kb2 = KnowledgeBase(str(tmp_path))
@@ -224,7 +226,7 @@ class TestMetaCache:
 
         _mcp, kb, _logger = _setup
 
-        result = kb.remember("New Entry", "Content.", ["test"])
+        result = kb.remember("New Entry", "Content.", ["test"], "snippet")
         entry_id = result["id"]
 
         # Must be in cache
@@ -237,7 +239,7 @@ class TestMetaCache:
 
         _mcp, kb, _logger = _setup
 
-        result = kb.remember("To Delete", "Content.", ["test"])
+        result = kb.remember("To Delete", "Content.", ["test"], "snippet")
         entry_id = result["id"]
 
         assert entry_id in kb._meta_cache
@@ -252,8 +254,8 @@ class TestMetaCache:
 
         _mcp, kb, _logger = _setup
 
-        kb.remember("Alpha", "A.", ["test"], force=True)
-        kb.remember("Beta", "B.", ["test"], force=True)
+        kb.remember("Alpha", "A.", ["test"], "snippet", force=True)
+        kb.remember("Beta", "B.", ["test"], "snippet", force=True)
 
         kb.rebuild()
 
@@ -393,6 +395,7 @@ class TestRememberAtomicityWarnings:
                 "title": "Multi-section",
                 "content": "## Section A\nFoo.\n\n## Section B\nBar.",
                 "tags": ["test"],
+                "entry_type": "snippet",
             },
         )
 
@@ -411,6 +414,7 @@ class TestRememberAtomicityWarnings:
                 "title": "Large article",
                 "content": "A" * 600,
                 "tags": ["test"],
+                "entry_type": "snippet",
             },
         )
 
@@ -429,6 +433,7 @@ class TestRememberAtomicityWarnings:
                 "title": "Very large article",
                 "content": "B" * 1100,
                 "tags": ["test"],
+                "entry_type": "snippet",
             },
         )
 
@@ -448,6 +453,7 @@ class TestRememberAtomicityWarnings:
                 "title": "Multi-paragraph",
                 "content": content,
                 "tags": ["test"],
+                "entry_type": "snippet",
             },
         )
 
@@ -466,6 +472,7 @@ class TestRememberAtomicityWarnings:
                 "title": "Atomic fact",
                 "content": "Logs go to stderr. Simplifies the Dockerfile.",
                 "tags": ["test"],
+                "entry_type": "snippet",
             },
         )
 
@@ -487,6 +494,7 @@ class TestToolRememberViaMcp:
                 "title": "MCP Test Entry",
                 "content": "Created via MCP tool call.",
                 "tags": ["mcp", "test"],
+                "entry_type": "snippet",
             },
         )
 
@@ -504,7 +512,7 @@ class TestToolSearchViaMcp:
         mcp, kb, _logger = _setup
 
         # Seed an entry first
-        kb.remember("Searchable Item", "Unique searchable content.", ["test"])
+        kb.remember("Searchable Item", "Unique searchable content.", ["test"], "snippet")
 
         result = _call_tool(mcp, "search", {"query": "searchable", "limit": 5})
 
@@ -521,7 +529,7 @@ class TestToolRecallViaMcp:
 
         mcp, kb, _logger = _setup
 
-        created = kb.remember("Recallable", "Full content here.", ["test"])
+        created = kb.remember("Recallable", "Full content here.", ["test"], "snippet")
         entry_id = created["id"]
 
         result = _call_tool(mcp, "recall", {"entry_id": entry_id})
@@ -550,7 +558,7 @@ class TestToolForgetViaMcp:
 
         mcp, kb, _logger = _setup
 
-        created = kb.remember("To Forget", "Ephemeral.", ["test"])
+        created = kb.remember("To Forget", "Ephemeral.", ["test"], "snippet")
         entry_id = created["id"]
 
         result = _call_tool(mcp, "forget", {"entry_id": entry_id})
@@ -581,8 +589,8 @@ class TestToolListViaMcp:
 
         mcp, kb, _logger = _setup
 
-        kb.remember("Listed A", "Body A.", ["alpha"], force=True)
-        kb.remember("Listed B", "Body B.", ["beta"], force=True)
+        kb.remember("Listed A", "Body A.", ["alpha"], "snippet", force=True)
+        kb.remember("Listed B", "Body B.", ["beta"], "snippet", force=True)
 
         result = _call_tool(mcp, "list", {"limit": 10})
 
@@ -600,8 +608,8 @@ class TestToolTagsViaMcp:
 
         mcp, kb, _logger = _setup
 
-        kb.remember("Tag Entry 1", "Body.", ["infra", "dns"], force=True)
-        kb.remember("Tag Entry 2", "Body.", ["infra", "ssl"], force=True)
+        kb.remember("Tag Entry 1", "Body.", ["infra", "dns"], "snippet", force=True)
+        kb.remember("Tag Entry 2", "Body.", ["infra", "ssl"], "snippet", force=True)
 
         result = _call_tool(mcp, "tags", {})
 
@@ -619,8 +627,8 @@ class TestToolRebuildViaMcp:
 
         mcp, kb, _logger = _setup
 
-        kb.remember("Rebuild A", "Alpha.", ["test"], force=True)
-        kb.remember("Rebuild B", "Beta.", ["test"], force=True)
+        kb.remember("Rebuild A", "Alpha.", ["test"], "snippet", force=True)
+        kb.remember("Rebuild B", "Beta.", ["test"], "snippet", force=True)
 
         result = _call_tool(mcp, "rebuild", {})
 

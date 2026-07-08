@@ -58,13 +58,14 @@ def _create_entry(
     tags: list[str] | None = None,
     *,
     force: bool = False,
+    entry_type: str = "snippet",
 ) -> dict[str, Any]:
     """Shorthand for creating an entry and asserting success."""
 
     if tags is None:
         tags = ["test"]
 
-    result = kb.remember(title, content, tags, force=force)
+    result = kb.remember(title, content, tags, entry_type, force=force)
     assert "error" not in result, f"Unexpected error: {result}"
 
     # Created or updated
@@ -82,7 +83,7 @@ class TestCRUD:
     def test_remember_create(self, kb: KnowledgeBase) -> None:
         """New title with no existing entry creates a new entry."""
 
-        result = kb.remember("New Backend Entry", "Body text.", ["infra"])
+        result = kb.remember("New Backend Entry", "Body text.", ["infra"], "snippet")
 
         assert result["action"] == "created"
         assert result["title"] == "New Backend Entry"
@@ -105,6 +106,7 @@ class TestCRUD:
             "Updated Title",
             "Updated body.",
             ["updated"],
+            "snippet",
             entry_id=entry_id,
         )
 
@@ -121,8 +123,8 @@ class TestCRUD:
     def test_remember_upsert_by_title(self, kb: KnowledgeBase) -> None:
         """Calling remember twice with the same title updates the first entry."""
 
-        first = kb.remember("Duplicate Title", "First body.", ["v1"])
-        second = kb.remember("Duplicate Title", "Second body.", ["v2"])
+        first = kb.remember("Duplicate Title", "First body.", ["v1"], "snippet")
+        second = kb.remember("Duplicate Title", "Second body.", ["v2"], "snippet")
 
         assert first["action"] == "created"
         assert second["action"] == "updated"
@@ -366,11 +368,55 @@ class TestRebuild:
         _create_entry(kb, "Alpha Entry", "Alpha content.", ["alpha"], force=True)
         _create_entry(kb, "Beta Entry", "Beta content.", ["beta"], force=True)
 
-        count = kb.rebuild()
+        result = kb.rebuild()
 
-        assert count == 2
+        assert result["count"] == 2
 
         # Search must still work after rebuild
         results = kb.search("alpha")
         assert len(results) >= 1
         assert results[0]["title"] == "Alpha Entry"
+
+    def test_rebuild_mixed_legacy_and_new_fields(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """Rebuild succeeds with a mix of legacy and extended-schema entries."""
+
+        _create_entry(kb, "Legacy Entry", "Legacy content.", ["tag"], force=True)
+        kb.remember(
+            "New Entry",
+            "New content.",
+            ["tag"],
+            "decision",
+            force=True,
+            resource="https://example.com",
+        )
+
+        result = kb.rebuild()
+
+        assert result["count"] == 2
+
+
+# ===========================================================================
+# Extended schema — type / resource
+# ===========================================================================
+
+
+class TestExtendedSchema:
+    """Extended schema fields (type/resource) across all backends."""
+
+    def test_index_with_new_fields_no_error(self, kb: KnowledgeBase) -> None:
+        """Indexing an entry with type/resource succeeds and round-trips."""
+
+        result = kb.remember(
+            "Hub Entry",
+            "Content.",
+            ["hub"],
+            entry_type="hub",
+            resource="https://github.com/org/repo",
+        )
+
+        entry = kb.get(result["id"])
+        assert entry is not None
+        assert entry["type"] == "hub"
+        assert entry["resource"] == "https://github.com/org/repo"
