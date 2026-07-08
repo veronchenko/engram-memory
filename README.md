@@ -21,12 +21,18 @@ Persistent server on the network. Share knowledge across multiple agents.
 
 ```bash
 docker run -d --name engram \
-  -p 8192:8192 \
+  -p 8192 \
   -v ./knowledge:/knowledge \
   foreigndmitryi/engram --transport sse
 
-claude mcp add --transport sse engram http://your-host:8192/sse
+docker port engram 8192   # host port Docker assigned
+claude mcp add --transport sse engram http://your-host:<port>/sse
 ```
+
+`-p 8192` (host port omitted) has Docker pick a free ephemeral host port
+instead of failing when a fixed port like 8192 is already taken by
+another container — check the actual assignment with `docker port`.
+Use `-p 8192:8192` instead if you need the host port to stay fixed.
 
 ### HTTP
 
@@ -34,11 +40,12 @@ Stateless, load-balanceable.
 
 ```bash
 docker run -d --name engram \
-  -p 8192:8192 \
+  -p 8192 \
   -v ./knowledge:/knowledge \
   foreigndmitryi/engram --transport streamable-http
 
-claude mcp add --transport http engram http://your-host:8192/mcp
+docker port engram 8192   # host port Docker assigned
+claude mcp add --transport http engram http://your-host:<port>/mcp
 ```
 
 ## Search
@@ -197,7 +204,7 @@ docker build -f tests/Dockerfile -t engram-test .
 docker run --rm engram-test
 
 # Run locally (SSE)
-docker run -d --name engram -p 8192:8192 -v ./knowledge:/knowledge engram --transport sse
+docker run -d --name engram -p 8192 -v ./knowledge:/knowledge engram --transport sse
 ```
 
 ## License

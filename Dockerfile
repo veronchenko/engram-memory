@@ -41,8 +41,8 @@ ENV ENGRAM_PORT=8192
 ENV ENGRAM_DASHBOARD_HOST=0.0.0.0
 ENV ENGRAM_DASHBOARD_PORT=8193
 ENV ENGRAM_EMBEDDING_MODEL=minishlab/potion-multilingual-128M
-# Dashboard (API + frontend) is off by default — only the MCP backend
-# starts. Set to 1/true/yes to also run the dashboard as a second process.
+# Dashboard (API + frontend) runs as a second process alongside the MCP
+# backend by default. Set to 0/false/no to run the backend only.
 ENV ENGRAM_ENABLE_DASHBOARD=1
 
 # Data volume
