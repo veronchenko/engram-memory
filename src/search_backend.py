@@ -431,8 +431,14 @@ class SQLiteBackend:
             just one of two signals feeding fusion.
         """
 
-        # Escape double quotes in user input for FTS5 query syntax
-        fts_query = query_str.replace('"', '""')
+        # Quote each word as its own FTS5 phrase so operator characters in
+        # user input (?, *, (, ), :, ^, -, AND/OR/NOT/NEAR...) are treated
+        # as literal text instead of MATCH syntax.
+        tokens = re.findall(r"\w+", query_str, flags=re.UNICODE)
+        if not tokens:
+            # Nothing left to search on keyword side — vector search alone.
+            return []
+        fts_query = " ".join(f'"{token}"' for token in tokens)
         tag_where, tag_params = self._tag_filter_clause(tags)
 
         sql = (

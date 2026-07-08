@@ -71,7 +71,12 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <project_name> — <short description>, type: hub, tags: [<project_name>], resource: <absolute path to project folder>}
+id: <uuid>
+title: <project_name> — <short description>
+type: hub
+tags:
+- <project_name>
+resource: <absolute path to project folder>
 ---
 
 <1-2 sentences: what it is, domain, port/env, part of which larger system.>
@@ -94,7 +99,12 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <pattern name> — <origin project> proof-of-concept, type: pattern, tags: [<project_name>, ...]}
+id: <uuid>
+title: <pattern name> — <origin project> proof-of-concept
+type: pattern
+tags:
+- <project_name>
+- ...
 ---
 
 <Pattern definition: problem it solves and general mechanism — 2-4 sentences.>
@@ -110,7 +120,12 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <external system/API/library> client — <project_name>, type: integration, tags: [<project_name>], resource: <path/module in the project>}
+id: <uuid>
+title: <external system/API/library> client — <project_name>
+type: integration
+tags:
+- <project_name>
+resource: <path/module in the project>
 ---
 
 **What it integrates with:** <external API/service/broker/library, version if relevant>
@@ -126,7 +141,11 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <feature name> — <key architectural detail>, type: feature, tags: [<project_name>]}
+id: <uuid>
+title: <feature name> — <key architectural detail>
+type: feature
+tags:
+- <project_name>
 ---
 
 <What the feature is, how the data relates (model) — 2-3 sentences.>
@@ -150,7 +169,11 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <what was decided> — <chosen option>, type: decision, tags: [<project_name>]}
+id: <uuid>
+title: <what was decided> — <chosen option>
+type: decision
+tags:
+- <project_name>
 ---
 
 **Context:** <the problem/fork in the road>
@@ -168,7 +191,11 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <bug symptom>, type: diagnostic, tags: [<project_name>]}
+id: <uuid>
+title: <bug symptom>
+type: diagnostic
+tags:
+- <project_name>
 ---
 
 **Symptom:** <how the bug/incident presented>
@@ -186,7 +213,11 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <procedure name>, type: procedure, tags: [<project_name>]}
+id: <uuid>
+title: <procedure name>
+type: procedure
+tags:
+- <project_name>
 ---
 
 **When to use:** <circumstances>
@@ -204,7 +235,11 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <preference area>, type: preference, tags: [<scope>]}
+id: <uuid>
+title: <preference area>
+type: preference
+tags:
+- <scope>
 ---
 
 **Preference:** <what the user prefers>
@@ -220,7 +255,11 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 
 ```markdown
 ---
-{id: <uuid>, title: <what the snippet does>, type: snippet, tags: [<project_name or language/area>]}
+id: <uuid>
+title: <what the snippet does>
+type: snippet
+tags:
+- <project_name or language/area>
 ---
 
 **Problem it solves:** <one line>

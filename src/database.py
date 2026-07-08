@@ -268,7 +268,7 @@ class KnowledgeBase:
 
         frontmatter = yaml.dump(
             fm_dict,
-            default_flow_style=True,
+            default_flow_style=False,
             allow_unicode=True,
             sort_keys=False,
         ).strip()

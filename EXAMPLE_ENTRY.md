@@ -1,5 +1,11 @@
 ---
-{id: 3f9c2e1a-7b44-4c3a-9e2d-1a2b3c4d5e6f, title: Example Entry — demonstrates the entry file format, tags: [snippet, engram_memory], type: snippet, resource: kb://3f9c2e1a-7b44-4c3a-9e2d-1a2b3c4d5e6f}
+id: 3f9c2e1a-7b44-4c3a-9e2d-1a2b3c4d5e6f
+title: Example Entry — demonstrates the entry file format
+tags:
+- snippet
+- engram_memory
+type: snippet
+resource: kb://3f9c2e1a-7b44-4c3a-9e2d-1a2b3c4d5e6f
 ---
 
 Пример содержимого записи (тело файла — обычный Markdown, пишется как угодно, но конвенция проекта — короткое summary в начале).
