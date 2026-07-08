@@ -244,10 +244,9 @@ class KnowledgeBase:
             "id": entry["id"],
             "title": entry["title"],
             "tags": entry["tags"],
+            "type": entry["type"],
         }
-        # Omit optional fields when empty so legacy-shaped entries stay legacy-shaped
-        if entry.get("type"):
-            fm_dict["type"] = entry["type"]
+        # resource is genuinely optional — omit when empty
         if entry.get("resource"):
             fm_dict["resource"] = entry["resource"]
 
