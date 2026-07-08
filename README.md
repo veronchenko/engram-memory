@@ -2,7 +2,7 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents persistent memory. Markdown files as source of truth, pluggable search backends, typed graph relations.
 
-**Website:** [engram-kb.org](https://engram-kb.org) · **Docker Hub:** [cylian/engram](https://hub.docker.com/r/cylian/engram)
+**Website:** [engram-kb.org](https://engram-kb.org) · **Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram)
 
 ## Quick Start
 
@@ -12,7 +12,7 @@ Your agent manages the server. Recommended for Claude Code, ChatGPT Desktop, Cur
 
 ```bash
 claude mcp add --transport stdio engram -- \
-  docker run -i --rm -v ./knowledge:/knowledge cylian/engram
+  docker run -i --rm -v ./knowledge:/knowledge foreigndmitryi/engram
 ```
 
 ### SSE
@@ -23,7 +23,7 @@ Persistent server on the network. Share knowledge across multiple agents.
 docker run -d --name engram \
   -p 8192:8192 \
   -v ./knowledge:/knowledge \
-  cylian/engram --transport sse
+  foreigndmitryi/engram --transport sse
 
 claude mcp add --transport sse engram http://your-host:8192/sse
 ```
@@ -36,7 +36,7 @@ Stateless, load-balanceable.
 docker run -d --name engram \
   -p 8192:8192 \
   -v ./knowledge:/knowledge \
-  cylian/engram --transport streamable-http
+  foreigndmitryi/engram --transport streamable-http
 
 claude mcp add --transport http engram http://your-host:8192/mcp
 ```
@@ -149,6 +149,18 @@ After discovering something about the infrastructure: remember it.
 
 A system prompt is easy to forget mid-session. For Claude Code, [`hooks/`](hooks/) ships a self-contained plugin (`SessionStart`, `Stop`, `SessionEnd` handlers) that mechanically nudges the agent to search Engram before starting work and reminds it to `remember` non-trivial changes before finishing, instead of relying on it recalling this section unprompted. See [`hooks/README.md`](hooks/README.md) for what each hook does and how to wire it into `settings.json`.
 
+### Disable Claude Code's built-in auto memory
+
+Claude Code ships its own automatic memory (`MEMORY.md` under `~/.claude/projects/<project>/memory/`, loaded every session). Running it alongside Engram means two systems writing overlapping notes and competing for the agent's attention, which gets in the way more than it helps. Turn it off in `settings.json`:
+
+```json
+{
+  "autoMemoryEnabled": false
+}
+```
+
+Or via environment variable (takes precedence over the setting and the `/memory` toggle): `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. See [Claude Code's memory docs](https://code.claude.com/docs/en/memory#enable-or-disable-auto-memory) for details.
+
 ## Configuration
 
 All options have `ENGRAM_*` environment variable fallbacks. CLI args take priority.
@@ -216,7 +228,7 @@ Then use it with `--backend {name}`. Engram loads it automatically via `importli
 ### Example: adding Whoosh backend
 
 ```dockerfile
-FROM cylian/engram:latest
+FROM foreigndmitryi/engram:latest
 
 # Install Whoosh
 RUN pip install --no-cache-dir whoosh==2.7.4

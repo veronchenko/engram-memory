@@ -119,9 +119,23 @@ If any script here changes location or is renamed, update the matching
    in force and are kept in sync with them.
 5. Verify `python` resolves on PATH for whatever shell Claude Code invokes
    hooks in (the commands call `python`, not a specific interpreter path).
-6. Restart/start a new Claude Code session — `SessionStart` fires once per
+6. Disable Claude Code's own built-in auto memory (`MEMORY.md` under
+   `~/.claude/projects/<project>/memory/`) — it's a separate system from
+   Engram and having both active means two competing memory systems writing
+   overlapping notes, which interferes with a clean Engram-only workflow.
+   Set in `settings.json` (any scope: user, project, local):
+
+   ```json
+   {
+     "autoMemoryEnabled": false
+   }
+   ```
+
+   or via environment variable, which takes precedence over both the
+   setting and the `/memory` toggle: `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+7. Restart/start a new Claude Code session — `SessionStart` fires once per
    new session, so an already-running session won't pick up the change.
-7. Sanity check: start a session and confirm `hooks/logs/debug.log` gets a
+8. Sanity check: start a session and confirm `hooks/logs/debug.log` gets a
    `session_start` line; end the session and confirm the matching
    `engram_stop_count_<session_id>.txt` temp file is gone afterward.
 
