@@ -1,0 +1,38 @@
+{
+  "description": "Nudges Claude Code to actually use the Engram MCP memory server — search before starting work, and remember non-trivial changes before finishing.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/engram_session_start.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/engram_stop_prompt.py\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/engram_session_end_cleanup.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
