@@ -56,7 +56,7 @@ The backend is pluggable — see [Custom Backend](#custom-backend) below.
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `remember` | Create or update an entry (upsert with duplicate detection). Returns `size` and `warnings` if article exceeds 2 KB or 4 KB. | `title`, `content`, `tags`, `entry_id`, `force` |
+| `remember` | Create or update an entry (upsert with duplicate detection). `entry_type` is required. Returns `size` and non-blocking atomicity `warnings` (Markdown headers, >3 paragraphs, >512 B / >1 KB). | `title`, `content`, `tags`, `entry_type`, `entry_id`, `force`, `resource` |
 | `recall` | Read an entry with its graph relations (outgoing + backlinks). Returns `size` and `last_modified`. | `entry_id` |
 | `search` | Full-text search with optional tag filter | `query`, `tags`, `limit` |
 | `list` | Browse entries sorted by title | `tags`, `limit` |
@@ -147,6 +147,8 @@ After making an architecture decision: remember the choice and the rationale.
 After discovering something about the infrastructure: remember it.
 ```
 
+A system prompt is easy to forget mid-session. For Claude Code, [`hooks/`](hooks/) ships a self-contained plugin (`SessionStart`, `Stop`, `SessionEnd` handlers) that mechanically nudges the agent to search Engram before starting work and reminds it to `remember` non-trivial changes before finishing, instead of relying on it recalling this section unprompted. See [`hooks/README.md`](hooks/README.md) for what each hook does and how to wire it into `settings.json`.
+
 ## Configuration
 
 All options have `ENGRAM_*` environment variable fallbacks. CLI args take priority.
@@ -169,12 +171,16 @@ Entries are Markdown files with YAML frontmatter in `<data-path>/entries/`:
 id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 title: Entry Title
 tags: [infrastructure, postgresql]
+type: decision
+resource: /path/to/relevant/file
 ---
 
 Markdown content here...
 ```
 
-The search index is a rebuildable cache in `<data-path>/index/<backend>/`. Delete it and `rebuild` — no data is ever lost.
+`type` is required on every `remember` call (a dedicated field, not part of `tags`) — it classifies the entry (`hub`, `decision`, `diagnostic`, `procedure`, `preference`, `snippet`, ...) and is filterable via `search`/`list`. `resource` is optional: a canonical file/folder path the entry describes. Legacy entries written before these fields existed still read fine.
+
+The search index is a rebuildable cache in `<data-path>/index/<backend>/`. Delete it and `rebuild` — no data is ever lost. `rebuild` also reports schema-conformance warnings (missing `type`, malformed `resource`) across existing entries.
 
 ## Custom Backend
 
