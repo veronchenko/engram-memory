@@ -192,8 +192,8 @@ The search index is a rebuildable cache at `<data-path>/index/engram.db`. Delete
 # Build
 docker build -t engram .
 
-# Test (90 tests, separate stage — pytest/tests/ never ship in the production image)
-docker build --target test -t engram-test .
+# Test (90 tests, separate Dockerfile — pytest/tests/ never ship in the production image)
+docker build -f tests/Dockerfile -t engram-test .
 docker run --rm engram-test
 
 # Run locally (SSE)

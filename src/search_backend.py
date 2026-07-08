@@ -183,6 +183,16 @@ class SQLiteBackend:
         # Initialize schema
         self._ensure_schema()
 
+    def warm_up(self) -> None:
+        """
+        Eagerly load the embedding model into the process-lifetime cache.
+
+        Call once at startup so the CPU/memory cost of loading model
+        weights happens during boot instead of on the first search().
+        """
+
+        _get_model(self._embedding_model)
+
     def _embed_text(self, text: str) -> bytes | None:
         """
         Compute a Model2Vec embedding for text, serialized as float32 bytes.
@@ -673,3 +683,30 @@ class SQLiteBackend:
 
         # Relations resolved
         return {"out": out, "in": incoming}
+
+    def get_all_relations(self) -> list[dict[str, str]]:
+        """
+        Get every graph relation in the index, for building a full graph.
+
+        Returns:
+            List of dicts with 'source_id', 'target_id', 'type'.
+        """
+
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "SELECT source_id, target_id, type FROM relations"
+            )
+            relations = [
+                {
+                    "source_id": row["source_id"],
+                    "target_id": row["target_id"],
+                    "type": row["type"],
+                }
+                for row in cursor
+            ]
+        finally:
+            conn.close()
+
+        # All relations returned
+        return relations

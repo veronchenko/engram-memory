@@ -949,6 +949,47 @@ class KnowledgeBase:
         # Tags listed
         return result
 
+    def get_graph(self, include_superseded: bool = False) -> dict[str, list[dict[str, Any]]]:
+        """
+        Build the full entry graph (nodes + edges) for visualization.
+
+        Nodes come from the metadata cache; edges come from the search
+        backend's relation index, filtered to only relations between two
+        included nodes.
+
+        Args:
+            include_superseded: Include entries that have been superseded.
+                Defaults to hiding them, matching list_entries/search.
+
+        Returns:
+            Dict with 'nodes' (id, title, tags, type) and 'edges'
+            (source_id, target_id, type).
+        """
+
+        nodes = []
+        node_ids: set[str] = set()
+        for entry_id, meta in self._meta_cache.items():
+            if not include_superseded and meta.get("superseded_by"):
+                continue
+            node_ids.add(entry_id)
+            nodes.append(
+                {
+                    "id": entry_id,
+                    "title": meta["title"],
+                    "tags": meta["tags"],
+                    "type": meta.get("type", ""),
+                }
+            )
+
+        edges = [
+            rel
+            for rel in self._backend.get_all_relations()
+            if rel["source_id"] in node_ids and rel["target_id"] in node_ids
+        ]
+
+        # Graph built
+        return {"nodes": nodes, "edges": edges}
+
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -474,6 +474,7 @@ def main() -> None:
     logger.info("Initializing knowledge base from %s", args.data_path)
     index_path = Path(args.data_path) / "index" / "engram.db"
     backend = SQLiteBackend(index_path, embedding_model=args.embedding_model)
+    backend.warm_up()
     kb = KnowledgeBase(args.data_path, backend=backend)
     logger.info(
         "Knowledge base ready (index=%s, embedding_model=%s)",
