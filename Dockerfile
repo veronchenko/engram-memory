@@ -35,10 +35,15 @@ USER engram
 ENV ENGRAM_DATA_PATH=/knowledge
 ENV ENGRAM_TRANSPORT=stdio
 ENV ENGRAM_HOST=0.0.0.0
+# ENGRAM_PORT/ENGRAM_DASHBOARD_PORT are starting ports: the first free port
+# at or above them is used, so the actual bound port can differ.
 ENV ENGRAM_PORT=8192
 ENV ENGRAM_DASHBOARD_HOST=0.0.0.0
 ENV ENGRAM_DASHBOARD_PORT=8193
 ENV ENGRAM_EMBEDDING_MODEL=minishlab/potion-multilingual-128M
+# Dashboard (API + frontend) is off by default — only the MCP backend
+# starts. Set to 1/true/yes to also run the dashboard as a second process.
+ENV ENGRAM_ENABLE_DASHBOARD=1
 
 # Data volume
 VOLUME /knowledge

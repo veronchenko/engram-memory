@@ -22,6 +22,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from database import KnowledgeBase
+from port_utils import find_free_port
 from search_backend import DEFAULT_EMBEDDING_MODEL, SQLiteBackend
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,11 @@ def parse_args() -> argparse.Namespace:
         "--port",
         type=int,
         default=int(_env("PORT", "8192")),
-        help="Listen port (env: ENGRAM_PORT, default: 8192)",
+        help=(
+            "Starting port for sse/streamable-http transport; the first free "
+            "port at or above this is used (env: ENGRAM_PORT, default: 8192). "
+            "Unused for stdio transport."
+        ),
     )
     parser.add_argument(
         "--embedding-model",
@@ -482,7 +487,15 @@ def main() -> None:
         args.embedding_model,
     )
 
-    mcp = FastMCP(name="Engram", host=args.host, port=args.port)
+    port = args.port
+    if args.transport != "stdio":
+        port = find_free_port(args.host, args.port)
+        if port != args.port:
+            logger.info(
+                "Port %d in use, using free port %d instead", args.port, port
+            )
+
+    mcp = FastMCP(name="Engram", host=args.host, port=port)
 
     # Register all tools using kb and mcp
     register_tools(mcp, kb, logger)

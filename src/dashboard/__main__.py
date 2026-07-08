@@ -16,6 +16,7 @@ from pathlib import Path
 import uvicorn
 
 from database import KnowledgeBase
+from port_utils import find_free_port
 
 from .app import create_app
 from search_backend import DEFAULT_EMBEDDING_MODEL, SQLiteBackend
@@ -52,7 +53,10 @@ def parse_args() -> argparse.Namespace:
         "--port",
         type=int,
         default=int(_env("DASHBOARD_PORT", "8193")),
-        help="Listen port (env: ENGRAM_DASHBOARD_PORT, default: 8193)",
+        help=(
+            "Starting port; the first free port at or above this is used "
+            "(env: ENGRAM_DASHBOARD_PORT, default: 8193)"
+        ),
     )
     parser.add_argument(
         "--embedding-model",
@@ -91,8 +95,14 @@ def main() -> None:
 
     app = create_app(kb)
 
-    logger.info("Starting Engram dashboard on %s:%d", args.host, args.port)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    port = find_free_port(args.host, args.port)
+    if port != args.port:
+        logger.info(
+            "Port %d in use, using free port %d instead", args.port, port
+        )
+
+    logger.info("Starting Engram dashboard on %s:%d", args.host, port)
+    uvicorn.run(app, host=args.host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
