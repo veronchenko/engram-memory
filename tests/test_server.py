@@ -579,6 +579,84 @@ class TestToolTagsViaMcp:
         assert result["count"] >= 2
 
 
+class TestToolSupersedeViaMcp:
+    """Test bi-temporal supersede/include_superseded plumbing through MCP."""
+
+    def test_remember_supersede_via_mcp(self, _setup: tuple) -> None:
+        """Calling remember with supersede=True via MCP versions the entry."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember("Old Fact", "Original.", ["test"], "decision")
+        old_id = created["id"]
+
+        result = _call_tool(
+            mcp,
+            "remember",
+            {
+                "title": "New Fact",
+                "content": "Replacement.",
+                "tags": ["test"],
+                "entry_type": "decision",
+                "entry_id": old_id,
+                "supersede": True,
+            },
+        )
+
+        assert result["action"] == "superseded"
+        assert result["previous_id"] == old_id
+
+        old_entry = kb.get(old_id)
+        assert old_entry is not None
+        assert old_entry["superseded_by"] == result["id"]
+
+    def test_search_include_superseded_via_mcp(self, _setup: tuple) -> None:
+        """search's include_superseded flag surfaces history via MCP."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember(
+            "Versioned", "Old gadget details.", ["test"], "decision"
+        )
+        kb.remember(
+            "Versioned",
+            "New gadget details.",
+            ["test"],
+            "decision",
+            entry_id=created["id"],
+            supersede=True,
+        )
+
+        hidden = _call_tool(mcp, "search", {"query": "gadget"})
+        assert hidden["count"] == 1
+
+        shown = _call_tool(
+            mcp, "search", {"query": "gadget", "include_superseded": True}
+        )
+        assert shown["count"] == 2
+
+    def test_list_include_superseded_via_mcp(self, _setup: tuple) -> None:
+        """list's include_superseded flag surfaces history via MCP."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember("Versioned Entry", "Old.", ["test"], "decision")
+        kb.remember(
+            "Versioned Entry",
+            "New.",
+            ["test"],
+            "decision",
+            entry_id=created["id"],
+            supersede=True,
+        )
+
+        hidden = _call_tool(mcp, "list", {})
+        assert hidden["count"] == 1
+
+        shown = _call_tool(mcp, "list", {"include_superseded": True})
+        assert shown["count"] == 2
+
+
 class TestToolRebuildViaMcp:
     """Test the rebuild tool through the MCP layer."""
 

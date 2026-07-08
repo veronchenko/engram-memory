@@ -142,6 +142,7 @@ def register_tools(
         query: str,
         tags: list[str] | None = None,
         limit: int = 10,
+        include_superseded: bool = False,
     ) -> dict:
         """
         Search the knowledge base using hybrid keyword + semantic search.
@@ -155,6 +156,9 @@ def register_tools(
             query: Search query string.
             tags: Optional tag filter (AND logic — all tags must match).
             limit: Maximum results to return (default: 10).
+            include_superseded: Include entries replaced via remember's
+                supersede flag (hidden by default — they're history, not
+                current facts).
 
         Returns:
             Dict with results list (id, title, tags, type, snippet, score).
@@ -165,7 +169,9 @@ def register_tools(
 
         logger.info("search: query='%s', tags=%s, limit=%d", query, tags, limit)
 
-        results = kb.search(query, tags=tags, limit=limit)
+        results = kb.search(
+            query, tags=tags, limit=limit, include_superseded=include_superseded
+        )
 
         # Search done
         return {"count": len(results), "results": results}
@@ -183,8 +189,12 @@ def register_tools(
 
         Returns:
             Dict with id, title, tags, content, relations — or error if not found.
-            Also includes 'type', 'resource' when set on the entry.
-            Relations has 'out' and 'in' lists, each with type, id, title.
+            Also includes 'type', 'resource' when set on the entry. If this
+            entry was replaced via remember's supersede flag, 'superseded_by'
+            holds the newer entry's id (follow it for the current version).
+            If this entry replaced an older one, 'supersedes' holds that
+            entry's id. Relations has 'out' and 'in' lists, each with type,
+            id, title.
         """
 
         logger.info("recall: id=%s", entry_id)
@@ -217,6 +227,7 @@ def register_tools(
         entry_id: str | None = None,
         force: bool = False,
         resource: str = "",
+        supersede: bool = False,
     ) -> dict:
         """
         Store or update a knowledge base entry (upsert).
@@ -248,6 +259,16 @@ def register_tools(
         runs-on, depends-on, mirrors). These links are automatically
         indexed as graph relations, queryable via recall.
 
+        Bi-temporal history: when updating an existing entry (via entry_id
+        or duplicate match) whose fact has genuinely changed — not just a
+        wording/tag fix — pass supersede=True instead of letting this call
+        overwrite it in place. The old entry is kept as-is with
+        superseded_by set to the new entry's id; the new entry gets
+        supersedes pointing back and its own valid_at. search()/list()
+        hide superseded entries by default (include_superseded=True to see
+        history); recall() on the old id still returns its own content
+        plus superseded_by so the caller can follow the chain forward.
+
         Args:
             title: Entry title.
             content: Entry body (Markdown).
@@ -259,17 +280,22 @@ def register_tools(
             force: Skip duplicate detection and always create new.
             resource: Optional canonical URI for the underlying asset
                 the entry describes (e.g. a repo path or service URL).
+            supersede: Create a new version instead of overwriting the
+                matched entry in place (see "Bi-temporal history" above).
+                No-op if entry_id/force leave no existing entry to replace.
 
         Returns:
-            Dict with id, title, and action ('created' or 'updated').
+            Dict with id, title, and action ('created', 'updated', or
+            'superseded'; 'superseded' also includes 'previous_id').
         """
 
         logger.info(
-            "remember: title='%s', tags=%s, entry_id=%s, force=%s",
+            "remember: title='%s', tags=%s, entry_id=%s, force=%s, supersede=%s",
             title,
             tags,
             entry_id,
             force,
+            supersede,
         )
 
         result = kb.remember(
@@ -280,6 +306,7 @@ def register_tools(
             entry_id=entry_id,
             force=force,
             resource=resource,
+            supersede=supersede,
         )
 
         # Add size metadata and atomicity warnings
@@ -351,6 +378,7 @@ def register_tools(
     def list_entries(
         tags: list[str] | None = None,
         limit: int = 50,
+        include_superseded: bool = False,
     ) -> dict:
         """
         List knowledge base entries, sorted by title.
@@ -358,6 +386,9 @@ def register_tools(
         Args:
             tags: Optional tag filter (AND logic — all tags must match).
             limit: Maximum entries to return (default: 50).
+            include_superseded: Include entries replaced via remember's
+                supersede flag (hidden by default — they're history, not
+                current facts).
 
         Returns:
             Dict with entries list (id, title, tags, type).
@@ -368,7 +399,9 @@ def register_tools(
 
         logger.info("list: tags=%s, limit=%d", tags, limit)
 
-        entries = kb.list_entries(tags=tags, limit=limit)
+        entries = kb.list_entries(
+            tags=tags, limit=limit, include_superseded=include_superseded
+        )
 
         # Listed
         return {"count": len(entries), "entries": entries}

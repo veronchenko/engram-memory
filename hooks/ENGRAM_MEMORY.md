@@ -49,6 +49,10 @@ Every entry is one file with YAML-like frontmatter (`id`, `title`, `tags`, `type
 
 Atomicity: `remember` enforces one decision per article via non-blocking warnings on the response — Markdown headers in `content`, more than 3 paragraphs, and size past 512 B (soft) / 1 KB (hard) all trigger a warning, though the write still succeeds. Keep content to one sentence stating the decision plus an optional short justification; split multi-decision content into separate linked entries instead.
 
+**Bi-temporal fields (`valid_at`/`superseded_by`/`supersedes`):** optional frontmatter, read-only from my side — the server sets `valid_at` automatically on creation/versioning, and `superseded_by`/`supersedes` when a `supersede` update happens. I never set these by hand.
+
+**When to use `supersede: true` on `remember`:** only when the fact itself genuinely changed — the thing it describes is now different (e.g. "the project moved from Xapian to SQLite FTS5", "the decision was reversed"). A plain `remember` (no `supersede`) still applies for corrections to wording, tags, or a typo in an otherwise-unchanged fact — those don't need a new version. When `supersede: true` is used, the old entry stays intact with `superseded_by` pointing at the new one — its history is preserved and traversable via `recall`, but `search`/`list` hide it by default (`include_superseded: true` to see it).
+
 | type | Use for | Back-link to hub? |
 |---|---|---|
 | `hub` | One per project/service — what it is, where it lives, stack, connections | — (it *is* the anchor) |
@@ -237,6 +241,8 @@ Don't create an entry just to use a type — if it doesn't fit "When to write to
 - Something surprising or non-obvious about a project/service was learned in the process (a constraint, a gotcha, a dependency on another project) — that's exactly the kind of thing code doesn't self-document.
 
 If none of the above happened (pure read, pure Q&A with no new fact), skip — don't force an entry for the sake of it.
+
+When updating an entry whose recorded fact has genuinely become outdated (not just imprecisely worded) — e.g. a decision was reversed, a service migrated to a different stack — prefer `remember(..., supersede=true)` over a plain overwrite, so the previous state stays recoverable instead of being silently lost.
 
 - After resolving a diagnostic: remember the root cause and the fix.
 - After executing a non-trivial procedure: remember the steps.

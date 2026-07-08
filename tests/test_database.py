@@ -702,3 +702,162 @@ class TestExtendedSchema:
         results = kb.search("xylophones")
         assert len(results) >= 1
         assert results[0]["type"] == "pattern"
+
+
+# ===========================================================================
+# Bi-temporal — supersede / valid_at / superseded_by
+# ===========================================================================
+
+
+class TestBiTemporal:
+    """Tests for supersede-based versioning and history visibility."""
+
+    def test_create_sets_valid_at(self, kb: KnowledgeBase) -> None:
+        """A freshly created entry gets a non-empty valid_at."""
+
+        result = kb.remember("Fresh Fact", "Content.", ["tag"], "decision")
+
+        entry = kb.get(result["id"])
+        assert entry is not None
+        assert entry["valid_at"] != ""
+
+    def test_supersede_by_id_creates_new_version(self, kb: KnowledgeBase) -> None:
+        """supersede=True on an entry_id update creates a new entry and
+        marks the old one superseded_by, without touching old content."""
+
+        created = _create_entry(kb, "Old Fact", "The DB is Postgres.")
+        old_id = created["id"]
+
+        result = kb.remember(
+            "New Fact",
+            "The DB is now SQLite.",
+            ["tag"],
+            "decision",
+            entry_id=old_id,
+            supersede=True,
+        )
+
+        assert result["action"] == "superseded"
+        assert result["previous_id"] == old_id
+        new_id = result["id"]
+        assert new_id != old_id
+
+        old_entry = kb.get(old_id)
+        assert old_entry is not None
+        assert old_entry["content"] == "The DB is Postgres."
+        assert old_entry["superseded_by"] == new_id
+
+        new_entry = kb.get(new_id)
+        assert new_entry is not None
+        assert new_entry["content"] == "The DB is now SQLite."
+        assert new_entry["supersedes"] == old_id
+        assert new_entry["valid_at"] != ""
+
+    def test_supersede_by_duplicate_match(self, kb: KnowledgeBase) -> None:
+        """supersede=True via title-based duplicate match also versions."""
+
+        created = kb.remember("Repeated Title", "First version.", ["tag"], "decision")
+        old_id = created["id"]
+
+        result = kb.remember(
+            "Repeated Title", "Second version.", ["tag"], "decision", supersede=True
+        )
+
+        assert result["action"] == "superseded"
+        assert result["previous_id"] == old_id
+
+        old_entry = kb.get(old_id)
+        assert old_entry is not None
+        assert old_entry["superseded_by"] == result["id"]
+
+    def test_supersede_noop_without_existing_entry(self, kb: KnowledgeBase) -> None:
+        """supersede=True with nothing to replace just creates normally."""
+
+        result = kb.remember(
+            "Brand New", "Content.", ["tag"], "decision", supersede=True
+        )
+
+        assert result["action"] == "created"
+
+    def test_search_hides_superseded_by_default(self, kb: KnowledgeBase) -> None:
+        """search() excludes superseded entries unless include_superseded=True."""
+
+        created = kb.remember(
+            "Versioned Fact", "Old fact about widgets.", ["tag"], "decision"
+        )
+        kb.remember(
+            "Versioned Fact",
+            "New fact about widgets.",
+            ["tag"],
+            "decision",
+            entry_id=created["id"],
+            supersede=True,
+        )
+
+        results = kb.search("widgets")
+        contents = {r["snippet"] for r in results}
+        assert not any("Old fact" in c for c in contents)
+        assert any("New fact" in c for c in contents)
+
+        results_all = kb.search("widgets", include_superseded=True)
+        assert len(results_all) == 2
+
+    def test_list_hides_superseded_by_default(self, kb: KnowledgeBase) -> None:
+        """list_entries() excludes superseded entries unless include_superseded=True."""
+
+        created = kb.remember("Versioned Entry", "Old.", ["tag"], "decision")
+        kb.remember(
+            "Versioned Entry",
+            "New.",
+            ["tag"],
+            "decision",
+            entry_id=created["id"],
+            supersede=True,
+        )
+
+        entries = kb.list_entries()
+        assert len(entries) == 1
+        assert entries[0]["id"] != created["id"]
+
+        entries_all = kb.list_entries(include_superseded=True)
+        assert len(entries_all) == 2
+
+    def test_recall_old_id_returns_own_content(self, kb: KnowledgeBase) -> None:
+        """get() on a superseded id returns that version's own content, not
+        the new one's — no silent forwarding."""
+
+        created = kb.remember("Chained Fact", "Original text.", ["tag"], "decision")
+        old_id = created["id"]
+        result = kb.remember(
+            "Chained Fact",
+            "Replacement text.",
+            ["tag"],
+            "decision",
+            entry_id=old_id,
+            supersede=True,
+        )
+
+        old_entry = kb.get(old_id)
+        assert old_entry is not None
+        assert old_entry["content"] == "Original text."
+        assert old_entry["superseded_by"] == result["id"]
+
+    def test_legacy_entry_bitemporal_fields_default_empty(
+        self, kb: KnowledgeBase, tmp_path: Path
+    ) -> None:
+        """A pre-existing file without bi-temporal fields parses with empty defaults."""
+
+        entry_id = str(uuid.uuid4())
+        legacy_file = tmp_path / "entries" / f"{entry_id}.md"
+        legacy_file.write_text(
+            f"---\nid: {entry_id}\ntitle: Legacy Entry\ntags: [legacy]\n---\n\n"
+            "Legacy content.\n",
+            encoding="utf-8",
+        )
+
+        entry = kb._read_entry(legacy_file)
+
+        assert entry is not None
+        assert entry["valid_at"] == ""
+        assert entry["superseded_by"] == ""
+        assert entry["supersedes"] == ""

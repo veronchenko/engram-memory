@@ -14,7 +14,8 @@ You create the Engram "hub" entry (and its linked detail entries) for a project 
 - Every `mcp__engram__remember` call requires an explicit `entry_type` argument (`hub`, `pattern`, `integration`, `feature`, `decision`, `procedure`, ...) — it's a dedicated frontmatter field now, not part of `tags`. The call fails with `{"error": "entry_type is required"}` if omitted.
 - Tag every entry you create with the project name so `search`/`list`/`tags` can filter by it later — `tags` no longer needs (or should contain) the entry type, since that lives in `entry_type`.
 - Pass `resource` (optional) as a filesystem path — the project folder for the `hub` entry, the specific file/module for detail entries (`integration`, `feature`, `pattern`, ...).
-- If a hub already exists, do not create a duplicate — update it in place (or tell the caller it already exists and stop).
+- `valid_at`/`superseded_by`/`supersedes` are optional frontmatter fields the server manages itself (`valid_at` set automatically on creation/versioning, `superseded_by`/`supersedes` set by a `supersede` update) — never set these by hand.
+- If a hub already exists, do not create a duplicate — update it in place, without `supersede` (the hub is a living snapshot of current project state, not a fact that gets replaced — it doesn't need history). If it's stale (stack changed, new services added), update it instead of duplicating.
 
 ## Procedure
 
@@ -62,6 +63,8 @@ Use `[<other_project_name>](kb://uuid#hub)` for any other project that already h
 ### 4. Write linked detail entries (only for what's substantial)
 
 For each notable thing you found, pick the matching `entry_type` below — don't force a type the project doesn't warrant. Every detail entry: `entry_type: "<type>"`, `tags: [<project_name>]`, end with `[Back to hub](kb://<hub-uuid>#hub)`, and get referenced back from the hub via `kb://uuid#type`.
+
+If a detail entry you're about to write already exists and what it recorded has genuinely changed (e.g. a `decision` was reversed, an `integration`/`feature` was replaced by a different implementation) — not just a wording tweak — call `mcp__engram__remember` with `supersede: true` on that entry instead of overwriting it, so the earlier state stays recoverable.
 
 - **`pattern`** — a reusable architectural pattern that originated here and could apply to other projects.
   ```markdown

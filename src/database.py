@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,11 @@ DEFAULT_LIST_LIMIT: int = 50
 
 # Duplicate detection threshold (SequenceMatcher ratio, 0.0-1.0)
 DUPLICATE_THRESHOLD: float = 0.75
+
+# Over-fetch multiplier for search() when filtering out superseded entries,
+# so trimming back down to `limit` still returns a full page when possible.
+_SUPERSEDED_FETCH_MULTIPLIER: int = 3
+_SUPERSEDED_FETCH_CAP: int = 300
 
 # Regex for parsing YAML frontmatter (anchored to start of file, line-start ---)
 _FRONTMATTER_RE: re.Pattern[str] = re.compile(r"\A---\n(.*?)\n---\n(.*)", re.DOTALL)
@@ -123,6 +129,7 @@ class KnowledgeBase:
                     "title": entry["title"],
                     "tags": entry["tags"],
                     "type": entry.get("type", ""),
+                    "superseded_by": entry.get("superseded_by", ""),
                 }
 
         # Cache loaded
@@ -134,6 +141,7 @@ class KnowledgeBase:
         title: str,
         tags: list[str],
         entry_type: str = "",
+        superseded_by: str = "",
     ) -> None:
         """
         Update or insert a single entry in the metadata cache.
@@ -143,6 +151,7 @@ class KnowledgeBase:
             title: Entry title.
             tags: Normalized tag list.
             entry_type: Entry classification (e.g. hub, decision, diagnostic).
+            superseded_by: UUID of the entry that replaced this one, if any.
         """
 
         # Upsert cache entry
@@ -150,6 +159,7 @@ class KnowledgeBase:
             "title": title,
             "tags": tags,
             "type": entry_type,
+            "superseded_by": superseded_by,
         }
 
     def _remove_from_meta_cache(self, entry_id: str) -> None:
@@ -213,6 +223,9 @@ class KnowledgeBase:
             "tags": _normalize_tags(meta.get("tags", [])),
             "type": str(meta.get("type", "")),
             "resource": str(meta.get("resource", "")),
+            "valid_at": str(meta.get("valid_at", "")),
+            "superseded_by": str(meta.get("superseded_by", "")),
+            "supersedes": str(meta.get("supersedes", "")),
             "content": content,
         }
 
@@ -243,9 +256,15 @@ class KnowledgeBase:
             "tags": entry["tags"],
             "type": entry["type"],
         }
-        # resource is genuinely optional — omit when empty
+        # resource and bi-temporal fields are genuinely optional — omit when empty
         if entry.get("resource"):
             fm_dict["resource"] = entry["resource"]
+        if entry.get("valid_at"):
+            fm_dict["valid_at"] = entry["valid_at"]
+        if entry.get("superseded_by"):
+            fm_dict["superseded_by"] = entry["superseded_by"]
+        if entry.get("supersedes"):
+            fm_dict["supersedes"] = entry["supersedes"]
 
         frontmatter = yaml.dump(
             fm_dict,
@@ -320,6 +339,72 @@ class KnowledgeBase:
     # CRUD operations (file + backend)
     # -----------------------------------------------------------------------
 
+    def _supersede(
+        self,
+        old_entry: dict[str, Any],
+        title: str,
+        content: str,
+        tags: list[str],
+        entry_type: str,
+        resource: str,
+    ) -> dict[str, Any]:
+        """
+        Replace an existing entry with a new version, preserving history.
+
+        The old entry's file is rewritten with `superseded_by` pointing at
+        the new entry's id; its title/content/tags are left untouched. The
+        new entry is created fresh with `supersedes` pointing back.
+
+        Args:
+            old_entry: Full dict of the entry being replaced (from self.get()).
+            title: New entry's title.
+            content: New entry's body.
+            tags: New entry's tags.
+            entry_type: New entry's classification.
+            resource: New entry's resource.
+
+        Returns:
+            Dict with id, title, action='superseded', previous_id.
+        """
+
+        old_id = old_entry["id"]
+        new_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+
+        old_entry["superseded_by"] = new_id
+        self._write_entry(old_entry)
+        self._backend.index(old_entry)
+        self._update_meta_cache(
+            old_id,
+            old_entry["title"],
+            old_entry["tags"],
+            old_entry.get("type", ""),
+            superseded_by=new_id,
+        )
+
+        new_entry = {
+            "id": new_id,
+            "title": title,
+            "tags": tags,
+            "type": entry_type,
+            "resource": resource,
+            "valid_at": now,
+            "supersedes": old_id,
+            "content": content,
+        }
+        self._write_entry(new_entry)
+        self._backend.index(new_entry)
+        self._update_meta_cache(new_id, title, tags, entry_type)
+
+        logger.info("Entry %s superseded by %s: %s", old_id, new_id, title)
+        # Superseded
+        return {
+            "id": new_id,
+            "title": title,
+            "action": "superseded",
+            "previous_id": old_id,
+        }
+
     def remember(
         self,
         title: str,
@@ -329,6 +414,7 @@ class KnowledgeBase:
         entry_id: str | None = None,
         force: bool = False,
         resource: str = "",
+        supersede: bool = False,
     ) -> dict[str, Any]:
         """
         Upsert an entry: update if it exists, create if it doesn't.
@@ -349,10 +435,16 @@ class KnowledgeBase:
             entry_id: Optional UUID of an existing entry to update.
             force: Skip duplicate detection and always create new.
             resource: Optional canonical URI for the underlying asset.
+            supersede: When updating an existing entry (via entry_id or
+                duplicate match), create a new version instead of overwriting
+                in place. The old entry is kept with `superseded_by` set to
+                the new entry's id; the new entry gets `supersedes` pointing
+                back and a fresh `valid_at`. No-op if there is no existing
+                entry to supersede (falls through to plain creation).
 
         Returns:
-            Dict with id, title, and action ('created' or 'updated'), or
-            an 'error' if entry_type is missing.
+            Dict with id, title, and action ('created', 'updated', or
+            'superseded'), or an 'error' if entry_type is missing.
         """
 
         if not entry_type or not entry_type.strip():
@@ -375,11 +467,19 @@ class KnowledgeBase:
                 # Not found
                 return {"error": f"Entry {entry_id} not found"}
 
+            if supersede:
+                # New version, old entry preserved as history
+                return self._supersede(
+                    existing, title, content, tags, entry_type, resource
+                )
+
             existing["title"] = title
             existing["content"] = content
             existing["tags"] = tags
             existing["type"] = entry_type
             existing["resource"] = resource
+            if not existing.get("valid_at"):
+                existing["valid_at"] = datetime.now(timezone.utc).isoformat()
 
             self._write_entry(existing)
             self._backend.index(existing)
@@ -397,11 +497,19 @@ class KnowledgeBase:
                 best = similar[0]
                 best_entry = self.get(best["id"])
                 if best_entry:
+                    if supersede:
+                        # New version, old entry preserved as history
+                        return self._supersede(
+                            best_entry, title, content, tags, entry_type, resource
+                        )
+
                     best_entry["title"] = title
                     best_entry["content"] = content
                     best_entry["tags"] = tags
                     best_entry["type"] = entry_type
                     best_entry["resource"] = resource
+                    if not best_entry.get("valid_at"):
+                        best_entry["valid_at"] = datetime.now(timezone.utc).isoformat()
 
                     self._write_entry(best_entry)
                     self._backend.index(best_entry)
@@ -430,6 +538,7 @@ class KnowledgeBase:
             "tags": tags,
             "type": entry_type,
             "resource": resource,
+            "valid_at": datetime.now(timezone.utc).isoformat(),
             "content": content,
         }
 
@@ -613,6 +722,7 @@ class KnowledgeBase:
         query_str: str,
         tags: list[str] | None = None,
         limit: int = DEFAULT_SEARCH_LIMIT,
+        include_superseded: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Full-text search with optional tag filtering.
@@ -624,6 +734,8 @@ class KnowledgeBase:
             query_str: Search query string.
             tags: Optional list of tags to filter by (AND logic).
             limit: Maximum number of results.
+            include_superseded: Include entries that have been superseded
+                (have a non-empty superseded_by). Defaults to hiding them.
 
         Returns:
             List of dicts with id, title, tags, type, snippet, score.
@@ -632,12 +744,23 @@ class KnowledgeBase:
         # Normalize tags before passing to backend
         normalized_tags = _normalize_tags(tags) if tags else None
 
+        # Over-fetch when filtering, so trimming back to `limit` still
+        # returns a full page — the backend has no notion of versioning.
+        fetch_limit = limit
+        if not include_superseded:
+            fetch_limit = min(limit * _SUPERSEDED_FETCH_MULTIPLIER, _SUPERSEDED_FETCH_CAP)
+
         # Get raw search results from backend (id + score)
-        raw_results = self._backend.search(query_str, normalized_tags, limit)
+        raw_results = self._backend.search(query_str, normalized_tags, fetch_limit)
 
         # Enrich results with entry data from Markdown files
         results: list[dict[str, Any]] = []
         for hit in raw_results:
+            if not include_superseded:
+                meta = self._meta_cache.get(hit["id"])
+                if meta and meta.get("superseded_by"):
+                    continue
+
             entry = self.get(hit["id"])
             if entry:
                 # Build snippet (first 200 chars of content)
@@ -655,6 +778,9 @@ class KnowledgeBase:
                         "score": hit["score"],
                     }
                 )
+
+            if len(results) >= limit:
+                break
 
         logger.info("Search '%s' returned %d results", query_str, len(results))
         # Search complete
@@ -755,6 +881,7 @@ class KnowledgeBase:
         self,
         tags: list[str] | None = None,
         limit: int = DEFAULT_LIST_LIMIT,
+        include_superseded: bool = False,
     ) -> list[dict[str, Any]]:
         """
         List entries sorted by title, with optional tag filter.
@@ -765,6 +892,8 @@ class KnowledgeBase:
         Args:
             tags: Optional list of tags to filter by (AND logic).
             limit: Maximum number of entries.
+            include_superseded: Include entries that have been superseded
+                (have a non-empty superseded_by). Defaults to hiding them.
 
         Returns:
             List of dicts with id, title, tags, type.
@@ -776,6 +905,10 @@ class KnowledgeBase:
         for entry_id, meta in self._meta_cache.items():
             # Apply tag filter
             if filter_tags and not filter_tags.issubset(set(meta["tags"])):
+                continue
+
+            # Hide superseded entries by default
+            if not include_superseded and meta.get("superseded_by"):
                 continue
 
             entries.append(

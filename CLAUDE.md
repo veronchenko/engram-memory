@@ -10,6 +10,7 @@ MCP server providing persistent memory for AI agents. Markdown files are the sou
 
 ## Conventions
 - Entries: Markdown file per entry in `<data-path>/entries/`, YAML frontmatter (`id`, `title`, `tags`), UUID-named.
+- Bi-temporal fields (optional frontmatter, omitted when empty): `valid_at` (ISO8601 UTC, set automatically on creation/versioning), `superseded_by`/`supersedes` (UUIDs linking an old and new version). `remember(..., supersede=True)` on an update creates a new entry instead of overwriting in place, marking the old one `superseded_by` the new id. `search`/`list` hide superseded entries by default (`include_superseded=True` to see history); `recall` on an old id still returns that version's own content plus `superseded_by`.
 - Index is a rebuildable cache at `<data-path>/index/engram.db` — never treat it as source of truth; `rebuild` regenerates it from entries.
 - Config via CLI args or `ENGRAM_*` env vars (CLI wins).
 - Embedding model: `minishlab/potion-multilingual-128M` (Model2Vec, 256-dim), overridable via `--embedding-model`/`ENGRAM_EMBEDDING_MODEL`. Pre-downloaded into the Docker image (`HF_HOME=/app/.cache/huggingface`) so runtime and tests never need network access for it. No pluggable backend abstraction — the project deliberately reverted that (see Engram diagnostic `dac9034d`); hybrid search lives directly in `SQLiteBackend`.
