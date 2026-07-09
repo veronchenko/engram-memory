@@ -28,3 +28,6 @@ Also sidesteps a Windows-only bug (`os.rename` refusing to overwrite an existing
 ## Gotchas
 - Windows: `os.rename` fails when overwriting an existing entry file — use an OS-safe replace, not raw `rename` (see git history / Engram diagnostic entry `7c31e93a`).
 - Atomicity: one decision per article — don't cram multiple unrelated facts into a single entry (enforced since v0.6.0).
+
+Extra docs:
+ DESIGN.md and PRODUCT.md - for design tasks and ui updates.
