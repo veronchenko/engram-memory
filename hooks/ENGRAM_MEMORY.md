@@ -13,6 +13,10 @@ Engram stores ZERO discoverable information (except for project Hub entries — 
 - **Diagnostics** — root causes of bugs/incidents and their fixes, once resolved.
 - **Procedures** — steps for things learned the hard way (deploys, migrations, one-off setups).
 
+## Memory language
+
+Every Engram entry — title, tags, and content — is written in English, regardless of what language the conversation is in. Translate the fact before calling `remember`; never store it in the user's conversational language.
+
 ## When to search Engram
 
 - At the start of a new session, or when the user's request shifts to a new topic/context — to refresh what's already known about the project before acting.

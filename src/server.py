@@ -148,6 +148,7 @@ def register_tools(
         tags: list[str] | None = None,
         limit: int = 10,
         include_superseded: bool = False,
+        entry_type: str | None = None,
     ) -> dict:
         """
         Search the knowledge base using hybrid keyword + semantic search.
@@ -164,6 +165,9 @@ def register_tools(
             include_superseded: Include entries replaced via remember's
                 supersede flag (hidden by default — they're history, not
                 current facts).
+            entry_type: Optional exact-match filter on entry type (e.g.
+                "diagnostic", "feature") — unlike tags, this is a single
+                value, not a list.
 
         Returns:
             Dict with results list (id, title, tags, type, snippet, score).
@@ -172,10 +176,20 @@ def register_tools(
         # Clamp limit to valid range
         limit = max(1, min(limit, 100))
 
-        logger.info("search: query='%s', tags=%s, limit=%d", query, tags, limit)
+        logger.info(
+            "search: query='%s', tags=%s, limit=%d, entry_type=%s",
+            query,
+            tags,
+            limit,
+            entry_type,
+        )
 
         results = kb.search(
-            query, tags=tags, limit=limit, include_superseded=include_superseded
+            query,
+            tags=tags,
+            limit=limit,
+            include_superseded=include_superseded,
+            entry_type=entry_type,
         )
 
         # Search done

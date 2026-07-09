@@ -635,6 +635,26 @@ class TestToolSupersedeViaMcp:
         )
         assert shown["count"] == 2
 
+    def test_search_entry_type_filter_via_mcp(self, _setup: tuple) -> None:
+        """search's entry_type filter narrows results to a single type via MCP."""
+
+        mcp, kb, _logger = _setup
+
+        kb.remember(
+            "Gadget Diagnostic", "Root cause of the gadget bug.", ["test"], "diagnostic"
+        )
+        kb.remember(
+            "Gadget Feature", "How the gadget feature works.", ["test"], "feature"
+        )
+
+        result = _call_tool(
+            mcp, "search", {"query": "gadget", "entry_type": "diagnostic"}
+        )
+
+        assert result["count"] == 1
+        assert result["results"][0]["title"] == "Gadget Diagnostic"
+        assert result["results"][0]["type"] == "diagnostic"
+
     def test_list_include_superseded_via_mcp(self, _setup: tuple) -> None:
         """list's include_superseded flag surfaces history via MCP."""
 

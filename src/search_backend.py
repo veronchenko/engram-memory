@@ -419,12 +419,36 @@ class SQLiteBackend:
         # Filter built
         return "AND " + " AND ".join(conditions), params
 
+    @staticmethod
+    def _type_filter_clause(
+        entry_type: str | None, alias: str = "e"
+    ) -> tuple[str, list[str]]:
+        """
+        Build a SQL AND-clause requiring an exact match on entry type.
+
+        Args:
+            entry_type: Optional entry type to filter by (exact match).
+            alias: Table alias qualifying the `type` column.
+
+        Returns:
+            Tuple of (SQL fragment starting with "AND ...", params) — the
+            SQL fragment is empty and params is [] when entry_type is falsy.
+        """
+
+        if not entry_type:
+            # No filter
+            return "", []
+
+        # Filter built
+        return f"AND {alias}.type = ?", [entry_type]
+
     def _bm25_search(
         self,
         conn: sqlite3.Connection,
         query_str: str,
         tags: list[str] | None,
         limit: int,
+        entry_type: str | None = None,
     ) -> list[str]:
         """
         Rank entries by BM25 keyword match.
@@ -434,6 +458,7 @@ class SQLiteBackend:
             query_str: Search query string.
             tags: Optional list of normalized tags to filter by (AND logic).
             limit: Maximum number of ids to return.
+            entry_type: Optional entry type to filter by (exact match).
 
         Returns:
             List of entry ids, best match first. Empty on FTS5 syntax
@@ -450,18 +475,21 @@ class SQLiteBackend:
             return []
         fts_query = " ".join(f'"{token}"' for token in tokens)
         tag_where, tag_params = self._tag_filter_clause(tags)
+        type_where, type_params = self._type_filter_clause(entry_type)
 
         sql = (
             "SELECT e.id, bm25(entries_fts) AS score "
             "FROM entries_fts AS f "
             "JOIN entries AS e ON e.rowid = f.rowid "
-            f"WHERE entries_fts MATCH ? {tag_where} "
+            f"WHERE entries_fts MATCH ? {tag_where} {type_where} "
             "ORDER BY score "
             "LIMIT ?"
         )
 
         try:
-            cursor = conn.execute(sql, [fts_query, *tag_params, limit])
+            cursor = conn.execute(
+                sql, [fts_query, *tag_params, *type_params, limit]
+            )
             # BM25 ranked ids
             return [row["id"] for row in cursor]
         except sqlite3.OperationalError as exc:
@@ -475,6 +503,7 @@ class SQLiteBackend:
         query_str: str,
         tags: list[str] | None,
         limit: int,
+        entry_type: str | None = None,
     ) -> list[str]:
         """
         Rank entries by cosine similarity of their stored embeddings.
@@ -484,6 +513,7 @@ class SQLiteBackend:
             query_str: Search query string.
             tags: Optional list of normalized tags to filter by (AND logic).
             limit: Maximum number of ids to return.
+            entry_type: Optional entry type to filter by (exact match).
 
         Returns:
             List of entry ids, most similar first. Empty when the
@@ -496,11 +526,12 @@ class SQLiteBackend:
             return []
 
         tag_where, tag_params = self._tag_filter_clause(tags)
+        type_where, type_params = self._type_filter_clause(entry_type)
         sql = (
             "SELECT id, embedding FROM entries e "
-            f"WHERE embedding IS NOT NULL {tag_where}"
+            f"WHERE embedding IS NOT NULL {tag_where} {type_where}"
         )
-        cursor = conn.execute(sql, tag_params)
+        cursor = conn.execute(sql, [*tag_params, *type_params])
 
         ids: list[str] = []
         vectors: list[np.ndarray] = []
@@ -557,7 +588,11 @@ class SQLiteBackend:
         return [{"id": entry_id, "score": round(score, 5)} for entry_id, score in fused]
 
     def search(
-        self, query_str: str, tags: list[str] | None, limit: int
+        self,
+        query_str: str,
+        tags: list[str] | None,
+        limit: int,
+        entry_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Hybrid search: BM25 keyword match fused with semantic similarity.
@@ -571,6 +606,7 @@ class SQLiteBackend:
             query_str: Search query string.
             tags: Optional list of normalized tags to filter by (AND logic).
             limit: Maximum number of results.
+            entry_type: Optional entry type to filter by (exact match).
 
         Returns:
             List of dicts with id and score keys.
@@ -586,8 +622,12 @@ class SQLiteBackend:
 
         conn = self._connect()
         try:
-            bm25_ids = self._bm25_search(conn, query_str, tags, candidate_limit)
-            vector_ids = self._vector_search(conn, query_str, tags, candidate_limit)
+            bm25_ids = self._bm25_search(
+                conn, query_str, tags, candidate_limit, entry_type=entry_type
+            )
+            vector_ids = self._vector_search(
+                conn, query_str, tags, candidate_limit, entry_type=entry_type
+            )
         finally:
             conn.close()
 

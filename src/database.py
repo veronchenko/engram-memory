@@ -723,9 +723,10 @@ class KnowledgeBase:
         tags: list[str] | None = None,
         limit: int = DEFAULT_SEARCH_LIMIT,
         include_superseded: bool = False,
+        entry_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Full-text search with optional tag filtering.
+        Full-text search with optional tag and entry-type filtering.
 
         Delegates to the search backend for raw results (id + score),
         then enriches with title, tags, and snippets from Markdown files.
@@ -736,6 +737,8 @@ class KnowledgeBase:
             limit: Maximum number of results.
             include_superseded: Include entries that have been superseded
                 (have a non-empty superseded_by). Defaults to hiding them.
+            entry_type: Optional entry type to filter by (exact match,
+                e.g. "diagnostic").
 
         Returns:
             List of dicts with id, title, tags, type, snippet, score.
@@ -751,7 +754,9 @@ class KnowledgeBase:
             fetch_limit = min(limit * _SUPERSEDED_FETCH_MULTIPLIER, _SUPERSEDED_FETCH_CAP)
 
         # Get raw search results from backend (id + score)
-        raw_results = self._backend.search(query_str, normalized_tags, fetch_limit)
+        raw_results = self._backend.search(
+            query_str, normalized_tags, fetch_limit, entry_type=entry_type
+        )
 
         # Enrich results with entry data from Markdown files
         results: list[dict[str, Any]] = []

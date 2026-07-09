@@ -206,6 +206,67 @@ class TestSearch:
         # Ansible entry must not appear
         assert "Ansible Networking" not in titles
 
+    def test_search_entry_type_filter(self, kb: KnowledgeBase) -> None:
+        """Search with entry_type filter only returns entries of that type."""
+
+        _create_entry(
+            kb,
+            "Deploy Diagnostic",
+            "Root cause of the deploy failure.",
+            ["ops"],
+            force=True,
+            entry_type="diagnostic",
+        )
+        _create_entry(
+            kb,
+            "Deploy Feature",
+            "How the deploy pipeline works.",
+            ["ops"],
+            force=True,
+            entry_type="feature",
+        )
+
+        results = kb.search("deploy", entry_type="diagnostic")
+
+        titles = {r["title"] for r in results}
+        assert "Deploy Diagnostic" in titles
+        assert "Deploy Feature" not in titles
+        for r in results:
+            assert r["type"] == "diagnostic"
+
+    def test_search_entry_type_and_tag_filter_combined(self, kb: KnowledgeBase) -> None:
+        """entry_type and tags filters combine with AND logic."""
+
+        _create_entry(
+            kb,
+            "Docker Diagnostic",
+            "Root cause of a docker networking bug.",
+            ["docker"],
+            force=True,
+            entry_type="diagnostic",
+        )
+        _create_entry(
+            kb,
+            "Ansible Diagnostic",
+            "Root cause of an ansible networking bug.",
+            ["ansible"],
+            force=True,
+            entry_type="diagnostic",
+        )
+        _create_entry(
+            kb,
+            "Docker Feature",
+            "How docker networking works.",
+            ["docker"],
+            force=True,
+            entry_type="feature",
+        )
+
+        results = kb.search("networking", tags=["docker"], entry_type="diagnostic")
+
+        titles = {r["title"] for r in results}
+        assert titles == {"Docker Diagnostic"}
+
     def test_search_limit(self, kb: KnowledgeBase) -> None:
         """The limit parameter caps the number of search results."""
 

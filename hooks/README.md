@@ -13,16 +13,21 @@ personal, global config edited directly, not a distributable repo artifact.
 - **`ENGRAM_MEMORY.md`** — verbatim copy of `~/.claude/ENGRAM_MEMORY.md`, the
   global instructions file that defines the "when to search"/"when to write"
   rules the three hooks below mechanically enforce. Kept here so the hook
-  logic and the policy it's enforcing sit side by side and can be diffed
-  against each other. **The live file is `~/.claude/ENGRAM_MEMORY.md`** —
-  this copy is read-only reference and must be re-copied by hand whenever
-  the original changes.
+  logic and the policy it's enforcing sit side by side for reading.
+  **The live file is `~/.claude/ENGRAM_MEMORY.md`** — this copy is read-only
+  reference.
 - **`engram-project-onboarder.md`** — verbatim copy of the
   `engram-project-onboarder` subagent definition (originally at
   `~/.claude/agents/engram-project-onboarder.md`). Referenced by
   `ENGRAM_MEMORY.md`'s "Project hygiene" section as the agent that creates a
   project's hub entry. Same caveat: the live copy Claude Code actually loads
   is under `~/.claude/agents/`, not here.
+
+  **Sync rule for both files above:** on install or update, hard-copy
+  (overwrite) whichever direction is stale — never hand-merge or diff the
+  two sides. These two files (the main instruction and the onboarder agent)
+  are the single exception to the general "review before applying" habit:
+  copy the file wholesale and move on.
 
 Four hooks, defined in `hooks.json`:
 

@@ -55,9 +55,14 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
         tags: list[str] | None = None,
         limit: int = 20,
         include_superseded: bool = False,
+        entry_type: str | None = None,
     ) -> dict:
         results = kb.search(
-            q, tags=tags, limit=limit, include_superseded=include_superseded
+            q,
+            tags=tags,
+            limit=limit,
+            include_superseded=include_superseded,
+            entry_type=entry_type,
         )
         return {"count": len(results), "results": results}
 
