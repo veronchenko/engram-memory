@@ -440,7 +440,7 @@ let selectedId = null;
 let hoveredNode = null;
 let dragging = null;
 let panX = 0, panY = 0, zoom = 1;
-let panning = false, panStart = null;
+let panning = false, panStart = null, panMoved = false;
 let searchMatchIds = null;
 let searchScores = new Map();
 let searchDebounce = null;
@@ -448,6 +448,7 @@ let searchActiveIndex = -1;
 let typeFilterValue = "";
 let highlightIds = null;
 let neighborIds = new Set();
+let highlightIsSelection = false;
 
 const TYPE_COLORS = {};
 const PALETTE = ["#6ea8fe", "#f2a65a", "#7ee787", "#f2555a", "#c792ea", "#5adfe0", "#e0c65a"];
@@ -554,7 +555,10 @@ function computeIsolation() {
     degree.set(e.source_id, (degree.get(e.source_id) || 0) + 1);
     degree.set(e.target_id, (degree.get(e.target_id) || 0) + 1);
   }
-  for (const n of visibleNodes) n.isolated = degree.get(n.id) === 0;
+  for (const n of visibleNodes) {
+    n.isolated = degree.get(n.id) === 0;
+    n.degree = degree.get(n.id) || 0;
+  }
 }
 
 function computeHighlight() {
@@ -563,10 +567,22 @@ function computeHighlight() {
   const structuralActive = !!tag || !!type;
   const searchActive = !!searchMatchIds;
   if (!structuralActive && !searchActive) {
+    if (selectedId) {
+      highlightIds = new Set([selectedId]);
+      neighborIds = new Set();
+      for (const e of edges) {
+        if (e.source_id === selectedId) neighborIds.add(e.target_id);
+        if (e.target_id === selectedId) neighborIds.add(e.source_id);
+      }
+      highlightIsSelection = true;
+      return;
+    }
     highlightIds = null;
     neighborIds = new Set();
+    highlightIsSelection = false;
     return;
   }
+  highlightIsSelection = false;
   let candidates = nodes;
   if (tag) candidates = candidates.filter(n => n.tags.some(t => t.toLowerCase().includes(tag)));
   if (type) candidates = candidates.filter(n => n.type === type);
@@ -732,7 +748,7 @@ function stepMotion(n) {
     node._r = node._r == null ? targetR : node._r + (targetR - node._r) * radiusLerp;
 
     const tier = tierOf(node.id);
-    const targetAlpha = tier === "unrelated" ? 0.35 : tier === "neighbor" ? 0.6 : (isHovered && !isSelected ? 0.85 : 1);
+    const targetAlpha = tier === "unrelated" ? (highlightIsSelection ? 0.1 : 0.35) : tier === "neighbor" ? 0.85 : (isHovered && !isSelected ? 0.85 : 1);
     node._alpha = node._alpha == null ? targetAlpha : node._alpha + (targetAlpha - node._alpha) * alphaLerp;
   }
 }
@@ -751,9 +767,19 @@ function step() {
       const distSq = Math.max(dx * dx + dy * dy, 25);
       const boost = (n[i].isolated && n[j].isolated) ? ISOLATED_PAIR_BOOST
         : (n[i].isolated !== n[j].isolated) ? ISOLATION_BOOST : 1;
-      const f = (REPULSION * boost) / distSq;
-      fx += (dx / Math.sqrt(distSq)) * f;
-      fy += (dy / Math.sqrt(distSq)) * f;
+      const degreeI = n[i].degree || 1, degreeJ = n[j].degree || 1;
+      const hubScale = 1 + Math.log(degreeI + degreeJ);
+      const f = (REPULSION * hubScale * boost) / distSq;
+      const dist = Math.sqrt(distSq);
+      fx += (dx / dist) * f;
+      fy += (dy / dist) * f;
+
+      const minDist = (n[i]._r ?? 7) + (n[j]._r ?? 7) + 15;
+      if (distSq < minDist * minDist) {
+        const overlap = minDist - dist;
+        fx += (dx / dist) * overlap * 0.8;
+        fy += (dy / dist) * overlap * 0.8;
+      }
     }
     if (n[i] !== dragging) {
       n[i].vx = (n[i].vx + fx) * DAMPING;
@@ -799,20 +825,48 @@ function draw() {
   ctx.scale(zoom * devicePixelRatio, zoom * devicePixelRatio);
 
   const byId = new Map(visibleNodes.map(node => [node.id, node]));
-  const GRAY_NEIGHBOR = "#7a7f92";
+  const GRAY_NEIGHBOR = "#b0b5c9";
   const GRAY_UNRELATED = "#4a4e5c";
 
   ctx.lineWidth = 1 / zoom;
+  const CURVE_OFFSET = 14, ARROW_LEN = 7;
+  const reciprocalPairs = new Set(visibleEdges.map(e => `${e.source_id}->${e.target_id}`));
+  const edgeCurve = (e, a, b) => {
+    let cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    if (reciprocalPairs.has(`${e.target_id}->${e.source_id}`)) {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+      const side = e.source_id < e.target_id ? 1 : -1;
+      cx += (-dy / len) * CURVE_OFFSET * side;
+      cy += (dx / len) * CURVE_OFFSET * side;
+    }
+    return { cx, cy };
+  };
   for (const e of visibleEdges) {
     const a = byId.get(e.source_id), b = byId.get(e.target_id);
     if (!a || !b) continue;
     const ta = tierOf(a.id), tb = tierOf(b.id);
     ctx.globalAlpha = !highlightIds ? 1 : (ta === "match" && tb === "match") ? 1 : (ta === "unrelated" && tb === "unrelated") ? 0.08 : 0.3;
     ctx.strokeStyle = "#3a3f4f";
+
+    const { cx, cy } = edgeCurve(e, a, b);
+    const angle = Math.atan2(b.y - cy, b.x - cx);
+    const targetR = (b._r ?? 7) + 2;
+    const edgeX = b.x - targetR * Math.cos(angle);
+    const edgeY = b.y - targetR * Math.sin(angle);
+
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.quadraticCurveTo(cx, cy, edgeX, edgeY);
     ctx.stroke();
+
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath();
+    ctx.moveTo(edgeX, edgeY);
+    ctx.lineTo(edgeX - ARROW_LEN * Math.cos(angle - Math.PI / 6), edgeY - ARROW_LEN * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(edgeX - ARROW_LEN * Math.cos(angle + Math.PI / 6), edgeY - ARROW_LEN * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 
@@ -858,6 +912,7 @@ function draw() {
       const rank = (n) => n.id === selectedId ? 0 : n === hoveredNode ? 1 : tierOf(n.id) === "match" ? 2 : tierOf(n.id) === "neighbor" ? 4 : 3;
       return rank(a) - rank(b);
     });
+  const zoomFade = Math.max(0, Math.min(1, (zoom - 0.35) / 0.25));
   for (const node of nodeLabelJobs) {
     const isSelected = node.id === selectedId;
     const isHovered = node === hoveredNode;
@@ -870,8 +925,10 @@ function draw() {
     const labelX = node.x + r + 4 + textWidth / 2;
     const labelY = node.y + 4 - fontSize * 0.32;
     if (!isSelected && !isHovered && !tryPlace(labelX, labelY, textWidth, fontSize * 1.1)) continue;
-    ctx.globalAlpha = Math.min(1, (alpha - 0.4) / 0.6);
-    ctx.fillStyle = tier === "neighbor" ? "#9a9eae" : "#c7cbdb";
+    const nodeZoomFade = isSelected || isHovered ? 1 : zoomFade;
+    if (nodeZoomFade <= 0) continue;
+    ctx.globalAlpha = Math.min(1, (alpha - 0.4) / 0.6) * nodeZoomFade;
+    ctx.fillStyle = "#c7cbdb";
     ctx.fillText(node.title, node.x + r + 4, node.y + 4);
     if (tier === "match" && searchScores.has(node.id)) {
       ctx.fillStyle = "#6ea8fe";
@@ -887,7 +944,7 @@ function draw() {
   const edgeLabelJobs = visibleEdges
     .map(e => ({ e, a: byId.get(e.source_id), b: byId.get(e.target_id) }))
     .filter(({ e, a, b }) => a && b && e.type)
-    .filter(({ a, b }) => tierOf(a.id) !== "unrelated" || tierOf(b.id) !== "unrelated")
+    .filter(({ a, b }) => a.id === selectedId || b.id === selectedId || a === hoveredNode || b === hoveredNode)
     .sort((x, y) => {
       const rank = ({ a, b }) => (tierOf(a.id) === "match" && tierOf(b.id) === "match") ? 0 : 1;
       return rank(x) - rank(y);
@@ -896,7 +953,9 @@ function draw() {
     const ta = tierOf(a.id), tb = tierOf(b.id);
     const dx = b.x - a.x, dy = b.y - a.y;
     if (Math.sqrt(dx * dx + dy * dy) * zoom < 60) continue;
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const { cx, cy } = edgeCurve(e, a, b);
+    const mx = 0.25 * a.x + 0.5 * cx + 0.25 * b.x;
+    const my = 0.25 * a.y + 0.5 * cy + 0.25 * b.y;
     const textWidth = ctx.measureText(e.type).width;
     const padX = 5 / zoom, padY = 3 / zoom;
     if (!tryPlace(mx, my, textWidth + padX * 2, 14 / zoom + padY * 2)) continue;
@@ -938,6 +997,7 @@ function nodeAt(worldX, worldY) {
 canvas.addEventListener("mousedown", (ev) => {
   const p = screenToWorld(ev.clientX, ev.clientY);
   const hit = nodeAt(p.x, p.y);
+  panMoved = false;
   if (hit) {
     dragging = hit;
   } else {
@@ -954,6 +1014,7 @@ window.addEventListener("mousemove", (ev) => {
   } else if (panning) {
     panX = ev.clientX - panStart.x;
     panY = ev.clientY - panStart.y;
+    panMoved = true;
   } else {
     const p = screenToWorld(ev.clientX, ev.clientY);
     hoveredNode = nodeAt(p.x, p.y);
@@ -966,9 +1027,11 @@ window.addEventListener("mouseup", () => {
   canvas.classList.remove("panning");
 });
 canvas.addEventListener("click", (ev) => {
+  if (panMoved) return;
   const p = screenToWorld(ev.clientX, ev.clientY);
   const hit = nodeAt(p.x, p.y);
   if (hit) openEntry(hit.id);
+  else closePanel();
 });
 canvas.addEventListener("wheel", (ev) => {
   ev.preventDefault();
@@ -984,6 +1047,7 @@ function openPanel() {
 function closePanel() {
   panel.classList.remove("open");
   selectedId = null;
+  computeHighlight();
   swapPanelContent(`
     <button id="panel-close" aria-label="Close panel">&times;</button>
     <div id="empty-hint">
@@ -998,6 +1062,7 @@ function closePanel() {
 
 async function openEntry(id) {
   selectedId = id;
+  computeHighlight();
   try {
     const res = await fetch(`/api/entries/${id}`);
     if (!res.ok) {
@@ -1155,6 +1220,7 @@ async function deleteEntry(entryId) {
 
 $("#btn-new").addEventListener("click", () => {
   selectedId = null;
+  computeHighlight();
   renderForm({ title: "", content: "", tags: [], type: "", resource: "" });
   openPanel();
 });
