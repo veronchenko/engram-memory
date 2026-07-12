@@ -4,6 +4,63 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives A
 
 **Website:** [engram-kb.org](https://engram-kb.org) · **Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram)
 
+## Concept
+
+Agent conversations end and take their context with them. Engram is the piece that survives: a knowledge base an agent searches *before* acting and writes to *after* resolving something non-obvious, so the next session — same project or a different one — starts with what was already learned instead of re-deriving it.
+
+It deliberately stores **zero discoverable information**. If a fact can be pulled from code, git history, config files, or existing docs, it does not belong in Engram — that's what greps and re-reads are for. What belongs is the kind of knowledge a conversation would otherwise lose: a decision and the alternatives it ruled out, a bug's root cause and fix, a procedure learned the hard way, a preference stated once that should hold from then on.
+
+Two things keep the base usable as it grows:
+- **Atomicity** — one entry, one fact. `remember` warns (non-blocking) on Markdown headers, more than 3 paragraphs, or content past 512 B/1 KB, pushing multi-fact dumps back into separate linked entries instead of a wall of text no search will rank well.
+- **The graph, not a pile** — entries link to each other via `kb://uuid#type` references, so related facts (a hub project, its features, a diagnostic tied to one of them) stay navigable both ways instead of living as isolated rows.
+
+## Features
+
+- **Hybrid search** — SQLite FTS5 (BM25, Porter stemming) fused with cosine similarity over local Model2Vec embeddings via Reciprocal Rank Fusion; finds entries by meaning, not just shared keywords, with zero cloud dependency
+- **Typed graph relations** — `kb://uuid#type` links between entries, resolved both directions (outgoing + backlinks) on every `recall`
+- **Entry types** — `hub`, `decision`, `diagnostic`, `procedure`, `preference`, `snippet`, ... — required on write, filterable on search/list
+- **Bi-temporal versioning** — `remember(..., supersede=True)` creates a new version instead of overwriting; old versions stay in history (`include_superseded=True`) instead of being lost
+- **Duplicate detection & link suggestions** — `remember` matches near-identical titles to avoid duplicate entries, and returns `suggested_links` (embedding-similarity matches) so related facts get cross-referenced instead of orphaned
+- **Atomicity guardrails** — non-blocking warnings on structural anti-patterns (headers, >3 paragraphs, oversized content) so the base stays one-fact-per-entry as it scales
+- **Web dashboard** — force-directed graph view, hybrid search, and a CRUD panel over the same knowledge base the MCP tools use (see [Dashboard](#dashboard))
+- **Three transports** — stdio (agent-managed), SSE, streamable-http — so the same server works for a single local agent or a shared multi-agent deployment
+- **Markdown as source of truth** — the SQLite index is a rebuildable cache; delete it and `rebuild`, no data is ever lost
+
+## Architecture
+
+```
+stdio/SSE/HTTP     +----------------------+
+──────────────────>|  server.py (MCP)     |----+
+                    |  remember / recall   |    |
+                    |  search / list ...   |    |
+                    +----------------------+    |
+                                                 v
+HTTP (REST)         +----------------------+   +------------------------+
+──────────────────> |  dashboard/app.py    |-->|  KnowledgeBase          |
+                     |  FastAPI + static UI |   |  (database.py)         |
+                     +----------------------+   |  Markdown + YAML, CRUD |
+                                                 +-----------+------------+
+                                                             |
+                                                             v
+                                                 +------------------------+
+                                                 |  SQLiteBackend          |
+                                                 |  (search_backend.py)    |
+                                                 |  BM25 + Model2Vec       |
+                                                 |  embeddings via RRF     |
+                                                 |  kb:// relation graph   |
+                                                 +------------------------+
+```
+
+Both entry points — the MCP tools and the dashboard's REST API — sit on top of the same `KnowledgeBase`/`SQLiteBackend` pair; neither duplicates the other's logic, so `remember`/`delete` behave identically whether called by an agent or edited by hand in the browser.
+
+- **`src/server.py`** — MCP tool definitions (`remember`, `recall`, `search`, `list`, `tags`, `forget`, `rebuild`), one process, stdio/SSE/streamable-http transport
+- **`src/database.py`** — `KnowledgeBase`: Markdown + YAML frontmatter CRUD, UUID assignment, duplicate detection, bi-temporal supersede logic
+- **`src/search_backend.py`** — `SQLiteBackend`: BM25 (FTS5) fused with Model2Vec cosine similarity via Reciprocal Rank Fusion, plus `kb://` relation extraction/graph traversal; embeddings are computed lazily on write and stored as a BLOB column
+- **`src/dashboard/`** — a second, optional process (`app.py` FastAPI REST + `/api/graph`, `static/index.html` vanilla-JS canvas graph, `__main__.py` its own uvicorn entry point) reusing the same `KnowledgeBase`
+- **`hooks/`** — a self-contained Claude Code plugin (`SessionStart`/`Stop`/`SessionEnd` + a `PreToolUse` search-before-remember gate) that mechanically enforces the search-first, remember-after workflow instead of relying on a system prompt alone
+
+In Docker, the MCP server and the dashboard run as two processes in one container (`docker-entrypoint.sh`), sharing the same `/knowledge` volume; the container exits if either process dies.
+
 ## Quick Start
 
 ### stdio
