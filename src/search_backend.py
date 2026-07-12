@@ -36,6 +36,17 @@ RRF_K: int = 60
 # under Model2Vec, while genuinely related pairs score 0.3+.
 MIN_COSINE_SIMILARITY: float = 0.2
 
+# Higher bar than MIN_COSINE_SIMILARITY: search recall tolerates loose
+# matches, but a suggested kb:// link should only surface entries that are
+# actually worth cross-referencing. Tuned against the real production KB
+# (see Engram diagnostic on entity-resolution prototyping) — 0.45 cleanly
+# separated genuinely related entries from the rest in both a topically
+# narrow cluster and a distinct-topic cluster.
+SUGGESTION_MIN_SIMILARITY: float = 0.45
+
+# Default number of suggested links to return from remember()
+SUGGESTION_TOP_K: int = 4
+
 _model_cache: dict[str, StaticModel] = {}
 
 
@@ -121,14 +132,23 @@ CREATE TABLE IF NOT EXISTS entries (
     tags TEXT NOT NULL,  -- JSON array
     type TEXT DEFAULT '',
     resource TEXT DEFAULT '',
-    embedding BLOB
+    embedding BLOB,
+    content TEXT DEFAULT ''
 )
 """
 
+# External-content table (content='entries') rather than genuinely
+# contentless (content='') — contentless FTS5 tables reject any DELETE
+# once a row has real indexed data, which broke unindex() and (via a
+# separate rowid-reuse issue on `entries`, a TEXT-keyed table where
+# INSERT OR REPLACE always assigns a fresh rowid) silently orphaned a
+# duplicate row on every update. External-content DELETE works because
+# FTS5 reads the current row back from `entries` to know what to remove.
 _SQL_CREATE_FTS: str = """
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     title, content, tags,
-    content='',
+    content='entries',
+    content_rowid='rowid',
     tokenize='porter unicode61'
 )
 """
@@ -193,6 +213,24 @@ class SQLiteBackend:
 
         _get_model(self._embedding_model)
 
+    def embed(self, text: str) -> bytes | None:
+        """
+        Compute a Model2Vec embedding for arbitrary text (public entry point).
+
+        For callers outside this module (e.g. KnowledgeBase's link-suggestion
+        pass) that need an embedding without going through index()/search().
+
+        Args:
+            text: Text to embed.
+
+        Returns:
+            Raw float32 bytes of the embedding vector, or None if the
+            embedding model is unavailable.
+        """
+
+        # Delegate to the internal implementation
+        return self._embed_text(text)
+
     def _embed_text(self, text: str) -> bytes | None:
         """
         Compute a Model2Vec embedding for text, serialized as float32 bytes.
@@ -244,8 +282,6 @@ class SQLiteBackend:
         conn = self._connect()
         try:
             conn.execute(_SQL_CREATE_ENTRIES)
-            conn.execute(_SQL_CREATE_FTS)
-            conn.execute(_SQL_CREATE_RELATIONS)
 
             # Migrate pre-existing databases that predate the embedding column
             try:
@@ -253,6 +289,34 @@ class SQLiteBackend:
             except sqlite3.OperationalError:
                 # Column already present
                 pass
+
+            # Migrate pre-existing databases that predate the content column
+            # (needed for entries_fts to work as an external-content table)
+            try:
+                conn.execute("ALTER TABLE entries ADD COLUMN content TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                # Column already present
+                pass
+
+            # Migrate a legacy contentless entries_fts (content='') to the
+            # external-content form — its module arguments can't be ALTERed,
+            # so the old table is dropped and recreated. This drops its
+            # indexed text; callers must run rebuild() once afterward to
+            # repopulate the full-text index from the Markdown entries
+            # (the SQLite index is always a rebuildable cache, never the
+            # source of truth).
+            legacy_fts = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='entries_fts'"
+            ).fetchone()
+            if legacy_fts is not None and "content='entries'" not in (legacy_fts[0] or ""):
+                conn.execute("DROP TABLE entries_fts")
+                logger.warning(
+                    "Migrated entries_fts to external-content FTS5 — "
+                    "run rebuild() to repopulate the full-text index"
+                )
+
+            conn.execute(_SQL_CREATE_FTS)
+            conn.execute(_SQL_CREATE_RELATIONS)
 
             conn.commit()
         finally:
@@ -297,23 +361,28 @@ class SQLiteBackend:
         if embedding is None:
             embedding = self._embed_text(f"{title}\n{content}")
 
-        # Upsert into entries table
+        # Remove any existing FTS row BEFORE overwriting the entries row.
+        # entries_fts is an external-content table (reads `entries` back by
+        # rowid to know what to remove), and `entries.id` is a TEXT primary
+        # key — not a rowid alias — so INSERT OR REPLACE always assigns a
+        # fresh rowid. Deleting first, while `entries` still holds the
+        # previous row at its original rowid, is what makes the delete
+        # actually match instead of silently targeting a stale rowid.
+        old_row = conn.execute(
+            "SELECT rowid FROM entries WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if old_row is not None:
+            conn.execute("DELETE FROM entries_fts WHERE rowid = ?", (old_row[0],))
+
+        # Upsert into entries table (may assign a new rowid — see above)
         conn.execute(
             "INSERT OR REPLACE INTO entries "
-            "(id, title, tags, type, resource, embedding) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (entry_id, title, tags_json, entry_type, resource, embedding),
+            "(id, title, tags, type, resource, embedding, content) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (entry_id, title, tags_json, entry_type, resource, embedding, content),
         )
 
-        # Delete old FTS row if it exists (contentless FTS requires manual delete)
-        conn.execute(
-            "DELETE FROM entries_fts WHERE rowid = ("
-            "  SELECT rowid FROM entries WHERE id = ?"
-            ")",
-            (entry_id,),
-        )
-
-        # Insert into FTS using the rowid from the entries table
+        # Insert into FTS using the (possibly new) rowid from the entries table
         conn.execute(
             "INSERT INTO entries_fts (rowid, title, content, tags) "
             "VALUES ((SELECT rowid FROM entries WHERE id = ?), ?, ?, ?)",
@@ -366,13 +435,14 @@ class SQLiteBackend:
 
         conn = self._connect()
         try:
-            # Delete FTS row first (needs rowid from entries)
-            conn.execute(
-                "DELETE FROM entries_fts WHERE rowid = ("
-                "  SELECT rowid FROM entries WHERE id = ?"
-                ")",
-                (entry_id,),
-            )
+            # Delete the FTS row first, while `entries` still has the row at
+            # its current rowid — external-content FTS5 reads `entries` back
+            # by rowid to know what to remove from the index.
+            old_row = conn.execute(
+                "SELECT rowid FROM entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+            if old_row is not None:
+                conn.execute("DELETE FROM entries_fts WHERE rowid = ?", (old_row[0],))
 
             # Delete relations (both directions)
             conn.execute("DELETE FROM relations WHERE source_id = ?", (entry_id,))
@@ -560,6 +630,71 @@ class SQLiteBackend:
         ranked = [i for i in ranked if similarities[i] >= MIN_COSINE_SIMILARITY]
         # Vector ranked ids
         return [ids[i] for i in ranked]
+
+    def find_similar_by_embedding(
+        self,
+        embedding: bytes,
+        exclude_id: str,
+        limit: int = SUGGESTION_TOP_K,
+        min_similarity: float = SUGGESTION_MIN_SIMILARITY,
+    ) -> list[dict[str, Any]]:
+        """
+        Rank stored entries by cosine similarity to a precomputed embedding.
+
+        Used for entity-resolution link suggestions on `remember` — the
+        caller already has the new/updated entry's embedding from indexing,
+        so this skips re-embedding a query string (unlike `_vector_search`).
+
+        Args:
+            embedding: Raw float32 embedding bytes to compare against.
+            exclude_id: Entry id to exclude (the entry itself).
+            limit: Maximum number of suggestions to return.
+            min_similarity: Cosine similarity floor — stricter than
+                MIN_COSINE_SIMILARITY, since a suggested link should be
+                worth cross-referencing, not merely worth surfacing in
+                search results.
+
+        Returns:
+            List of dicts with id and score, most similar first. Empty
+            when no other entry clears the similarity floor.
+        """
+
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "SELECT id, embedding FROM entries "
+                "WHERE embedding IS NOT NULL AND id != ?",
+                (exclude_id,),
+            )
+            ids: list[str] = []
+            vectors: list[np.ndarray] = []
+            for row in cursor:
+                ids.append(row["id"])
+                vectors.append(np.frombuffer(row["embedding"], dtype=np.float32))
+        finally:
+            conn.close()
+
+        if not ids:
+            # No other embedded entries to compare against
+            return []
+
+        query_vec = np.frombuffer(embedding, dtype=np.float32)
+        matrix = np.vstack(vectors)
+
+        query_norm = np.linalg.norm(query_vec)
+        matrix_norms = np.linalg.norm(matrix, axis=1)
+        # Avoid division by zero for degenerate (all-zero) vectors
+        denom = matrix_norms * query_norm
+        denom[denom == 0] = np.inf
+        similarities = (matrix @ query_vec) / denom
+
+        ranked = np.argsort(-similarities)[: max(limit * 5, limit)]
+        # Suggestions ranked
+        return [
+            {"id": ids[i], "score": round(float(similarities[i]), 4)}
+            for i in ranked
+            if similarities[i] >= min_similarity
+        ][:limit]
 
     @staticmethod
     def _rrf_fuse(

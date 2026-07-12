@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -339,6 +340,50 @@ class KnowledgeBase:
     # CRUD operations (file + backend)
     # -----------------------------------------------------------------------
 
+    def _suggest_links(
+        self, entry_id: str, title: str, content: str
+    ) -> list[dict[str, Any]]:
+        """
+        Suggest kb:// links to existing entries similar to this one.
+
+        Reuses the embedding infrastructure already computed for search
+        indexing to surface entries worth cross-referencing on `remember` —
+        suggestions only, never auto-added; the caller decides whether to
+        add the link.
+
+        Args:
+            entry_id: UUID of the entry just written (excluded from results).
+            title: Entry title.
+            content: Entry body.
+
+        Returns:
+            List of dicts with id, title, score, most similar first. Entries
+            already linked via an explicit kb:// reference in content are
+            excluded. Empty when the embedding model is unavailable or
+            nothing clears the similarity floor.
+        """
+
+        embedding = self._backend.embed(f"{title}\n{content}")
+        if embedding is None:
+            # Semantic suggestions unavailable this call
+            return []
+
+        already_linked = {rel["target"] for rel in extract_relations(content)}
+        candidates = self._backend.find_similar_by_embedding(
+            embedding, exclude_id=entry_id
+        )
+
+        # Suggestions resolved
+        return [
+            {
+                "id": candidate["id"],
+                "title": self._resolve_title(candidate["id"]),
+                "score": candidate["score"],
+            }
+            for candidate in candidates
+            if candidate["id"] not in already_linked
+        ]
+
     def _supersede(
         self,
         old_entry: dict[str, Any],
@@ -397,13 +442,18 @@ class KnowledgeBase:
         self._update_meta_cache(new_id, title, tags, entry_type)
 
         logger.info("Entry %s superseded by %s: %s", old_id, new_id, title)
-        # Superseded
-        return {
+        response = {
             "id": new_id,
             "title": title,
             "action": "superseded",
             "previous_id": old_id,
         }
+        suggestions = self._suggest_links(new_id, title, content)
+        if suggestions:
+            response["suggested_links"] = suggestions
+
+        # Superseded
+        return response
 
     def remember(
         self,
@@ -444,7 +494,10 @@ class KnowledgeBase:
 
         Returns:
             Dict with id, title, and action ('created', 'updated', or
-            'superseded'), or an 'error' if entry_type is missing.
+            'superseded'), or an 'error' if entry_type is missing. Includes
+            'suggested_links' (list of {id, title, score}) when other
+            entries are similar enough to be worth a kb:// cross-reference —
+            suggestions only, never auto-added; omitted when there are none.
         """
 
         if not entry_type or not entry_type.strip():
@@ -486,8 +539,13 @@ class KnowledgeBase:
             self._update_meta_cache(entry_id, title, tags, entry_type)
 
             logger.info("Updated entry %s: %s", entry_id, title)
+            response = {"id": entry_id, "title": title, "action": "updated"}
+            suggestions = self._suggest_links(entry_id, title, content)
+            if suggestions:
+                response["suggested_links"] = suggestions
+
             # Updated
-            return {"id": entry_id, "title": title, "action": "updated"}
+            return response
 
         # Case 2: no ID, check for duplicates (unless forced)
         if not force:
@@ -521,14 +579,19 @@ class KnowledgeBase:
                         best["score"],
                         title,
                     )
-                    # Updated via duplicate match
-                    return {
+                    response = {
                         "id": best["id"],
                         "title": title,
                         "action": "updated",
                         "matched": best["title"],
                         "similarity": best["score"],
                     }
+                    suggestions = self._suggest_links(best["id"], title, content)
+                    if suggestions:
+                        response["suggested_links"] = suggestions
+
+                    # Updated via duplicate match
+                    return response
 
         # Case 3: create new
         entry_id = str(uuid.uuid4())
@@ -547,8 +610,13 @@ class KnowledgeBase:
         self._update_meta_cache(entry_id, title, tags, entry_type)
 
         logger.info("Created new entry %s: %s", entry_id, title)
+        response = {"id": entry_id, "title": title, "action": "created"}
+        suggestions = self._suggest_links(entry_id, title, content)
+        if suggestions:
+            response["suggested_links"] = suggestions
+
         # Entry created
-        return {"id": entry_id, "title": title, "action": "created"}
+        return response
 
     def get(self, entry_id: str, with_relations: bool = False) -> dict[str, Any] | None:
         """
@@ -706,7 +774,7 @@ class KnowledgeBase:
 
         try:
             self._backend.unindex(entry_id)
-        except Exception:
+        except sqlite3.Error:
             logger.warning("Entry %s not in index (already removed?)", entry_id)
 
         logger.info("Deleted entry %s", entry_id)

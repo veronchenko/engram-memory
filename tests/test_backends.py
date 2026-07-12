@@ -547,3 +547,161 @@ class TestHybridSearch:
 
         results = kb.search("orchestrating containers across machines")
         assert any(r["title"] == "Kubernetes Deployment Guide" for r in results)
+
+
+# ===========================================================================
+# FTS5 index integrity (external-content table)
+# ===========================================================================
+
+
+class TestFTSIndexIntegrity:
+    """
+    Regression tests for the contentless-FTS5 bug.
+
+    entries_fts used to be a genuinely contentless table (content=''),
+    which silently orphaned a duplicate row on every update (INSERT OR
+    REPLACE on the TEXT-keyed entries table reassigns a new rowid, so the
+    "delete old FTS row" step targeted a stale rowid and matched nothing)
+    and made unindex() raise "cannot DELETE from contentless fts5 table"
+    once a row's rowid finally did match real indexed content.
+    """
+
+    def test_update_does_not_orphan_fts_row(self, kb: KnowledgeBase) -> None:
+        """Updating an entry keeps entries and entries_fts row counts equal."""
+
+        created = _create_entry(kb, "Original Title", "Original body.")
+        kb.remember(
+            "Updated Title",
+            "Updated body, different content entirely.",
+            ["updated"],
+            "snippet",
+            entry_id=created["id"],
+        )
+
+        conn = kb._backend._connect()
+        try:
+            entries_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+            fts_count = conn.execute("SELECT COUNT(*) FROM entries_fts").fetchone()[0]
+        finally:
+            conn.close()
+
+        assert entries_count == fts_count == 1
+
+    def test_unindex_does_not_raise_on_indexed_entry(self, kb: KnowledgeBase) -> None:
+        """unindex() on an entry with real indexed content must not raise."""
+
+        created = _create_entry(kb, "To Delete", "Content that gets indexed.")
+
+        # Must not raise sqlite3.OperationalError
+        kb._backend.unindex(created["id"])
+
+        conn = kb._backend._connect()
+        try:
+            entries_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        finally:
+            conn.close()
+
+        assert entries_count == 0
+
+    def test_delete_reports_success_and_leaves_no_orphan(self, kb: KnowledgeBase) -> None:
+        """delete() actually removes the index row, not just the Markdown file."""
+
+        created = _create_entry(kb, "To Delete", "Content that gets indexed.")
+
+        assert kb.delete(created["id"]) is True
+
+        conn = kb._backend._connect()
+        try:
+            row = conn.execute(
+                "SELECT id FROM entries WHERE id = ?", (created["id"],)
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert row is None
+
+
+# ===========================================================================
+# Entity-resolution auto-linking
+# ===========================================================================
+
+
+class TestAutoLinking:
+    """Suggested kb:// links surfaced by remember() via embedding similarity."""
+
+    def test_suggests_similar_entry(self, kb: KnowledgeBase) -> None:
+        """A near-duplicate-topic entry is suggested as a link candidate."""
+
+        _create_entry(
+            kb,
+            "Hybrid search backend shipped (BM25 + embeddings via RRF)",
+            "SQLiteBackend.search() fuses FTS5 BM25 keyword search with "
+            "cosine similarity over local Model2Vec embeddings.",
+            ["search"],
+            force=True,
+        )
+
+        result = kb.remember(
+            "Roadmap: entity resolution reuses the embedding search layer",
+            "On remember, run new content through the existing embedding "
+            "layer used by hybrid BM25 + Model2Vec semantic search to "
+            "suggest kb:// links to similar entries.",
+            ["search", "roadmap"],
+            "idea",
+            force=True,
+        )
+
+        assert "suggested_links" in result
+        assert any(
+            "Hybrid search backend" in link["title"]
+            for link in result["suggested_links"]
+        )
+
+    def test_no_suggestions_for_unrelated_content(self, kb: KnowledgeBase) -> None:
+        """An entry on an unrelated topic gets no suggested links."""
+
+        _create_entry(
+            kb,
+            "Hybrid search backend shipped (BM25 + embeddings via RRF)",
+            "SQLiteBackend.search() fuses FTS5 BM25 keyword search with "
+            "cosine similarity over local Model2Vec embeddings.",
+            ["search"],
+            force=True,
+        )
+
+        result = kb.remember(
+            "Grandmother's sourdough starter feeding schedule",
+            "Feed the starter equal parts flour and water every morning, "
+            "discard half before feeding, keep it at room temperature.",
+            ["baking"],
+            "snippet",
+            force=True,
+        )
+
+        assert result.get("suggested_links", []) == []
+
+    def test_does_not_suggest_already_linked_entry(self, kb: KnowledgeBase) -> None:
+        """An entry already referenced via kb:// is excluded from suggestions."""
+
+        target = _create_entry(
+            kb,
+            "Hybrid search backend shipped (BM25 + embeddings via RRF)",
+            "SQLiteBackend.search() fuses FTS5 BM25 keyword search with "
+            "cosine similarity over local Model2Vec embeddings.",
+            ["search"],
+            force=True,
+        )
+
+        result = kb.remember(
+            "Roadmap: entity resolution reuses the embedding search layer",
+            "On remember, run new content through the existing embedding "
+            "layer used by hybrid BM25 + Model2Vec semantic search "
+            f"(see [hybrid backend](kb://{target['id']}#feature)) to "
+            "suggest kb:// links to similar entries.",
+            ["search", "roadmap"],
+            "idea",
+            force=True,
+        )
+
+        linked_ids = {link["id"] for link in result.get("suggested_links", [])}
+        assert target["id"] not in linked_ids

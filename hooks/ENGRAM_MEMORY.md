@@ -2,41 +2,29 @@
 
 Engram is an MCP server (`remember`, `recall`, `search`, `list`, `tags`, `forget`, `rebuild`) backed by a local knowledge base at `~/.claude/engram/knowledge`. It survives across projects and sessions.
 
-Engram stores ZERO discoverable information (except for project Hub entries — see "Project hygiene" below). If it can be derived from code, git history, config files, or existing documentation, it does not belong in Engram. Engram is for things that are lost when a conversation ends:
-
-- **Dev preferences** — coding/tooling/workflow choices the user has stated or corrected me on, that aren't already in a CLAUDE.md.
-- **Projects** — what each project is, where it lives, its stack, and any non-obvious context about it.
-- **Previously implemented services/projects** — what was built, for which service/project, what it does, its stack and where it lives, so past work can be found and referenced instead of re-discovered or re-built from scratch.
-- **Architecture decisions** — chosen approach, alternatives considered, and the reasoning, scoped to the project/component it applies to.
-- **Project structure preferences** — how the user likes a project laid out (layering, module boundaries, folder conventions) when it isn't already codified in that project's CLAUDE.md.
-- **Code snippets** — small reusable examples (a pattern, a config block, a one-liner) that solved a recurring problem and are worth pulling up again instead of re-deriving.
-- **Diagnostics** — root causes of bugs/incidents and their fixes, once resolved.
-- **Procedures** — steps for things learned the hard way (deploys, migrations, one-off setups).
+Engram stores no discoverable information (except for project Hub entries — see "Project hygiene" below). If it can be derived from code, git history, config files, or existing documentation, it does not belong in Engram. What belongs in Engram vs. what doesn't — see entry types below.
 
 ## Memory language
 
-Every Engram entry — title, tags, and content — is written in English, regardless of what language the conversation is in. Translate the fact before calling `remember`; never store it in the user's conversational language.
+Every entry (title, tags, content) is written in English — translate before calling `remember`.
 
 ## When to search Engram
 
 - At the start of a new session, or when the user's request shifts to a new topic/context — to refresh what's already known about the project before acting.
 
+## Suggested links from remember
+
+`remember` returns `suggested_links` (never auto-added) — link only genuinely relevant ones: add a `kb://<id>#<type>` reference into the entry's content with a follow-up `remember` call (same `entry_id`).
+
 ## Project hygiene — every project is a hub entry in Engram
 
-Whenever I'm working in a project directory and Engram has no entry for it (search/list/tags turn up nothing), create one before or during the session. Delegate this to the `engram-project-onboarder` subagent (via the Agent tool) — it investigates the project (CLAUDE.md/README, manifest, git remote, layout) and writes the hub plus linked entries per the schema below, so this doesn't have to be done by hand each time. This entry acts as a **hub**: a future session in a *different* project has no access to this project's CLAUDE.md/README, so the hub always states what the project does in full, even if that's also written elsewhere — that's the one exception to "zero discoverable information," because discoverable-from-within-this-repo isn't the same as discoverable-from-another-project's-session.
+Whenever working in a project directory that lacks an Engram entry, delegate its creation to the `engram-project-onboarder` subagent (via the Agent tool). The subagent will investigate the project and write a **hub** entry plus any linked details. 
 
-The hub entry always includes:
+The hub entry must strictly follow the `hub` template below. This is the *only* exception to the "zero discoverable information" rule: because future sessions in *other* projects won't have access to this project's README/CLAUDE.md, the hub must always fully state what the project does.
 
-- **What it does** — one or two sentences, purpose/domain, with the project folder path set in the `resource` field (remote URL noted in the body). Always present, regardless of whether a CLAUDE.md/README already says it.
-- **Connections to other projects** — what it calls, is called by, shares infra/DB with, or was split off from.
+Beyond the hub, do not cram everything into one entry. Write **separate linked entries** for implementations, integrations, non-trivial features, and future work. Link them to the hub (and to each other) via `kb://<uuid>#<type>` references.
 
-Beyond the hub, don't cram everything into one entry — write **separate linked entries** for each substantial thing tied to the project, and link them to the hub (and to each other) via `kb://uuid#type` references so the graph is traversable both ways (hub → details, detail → hub):
-
-- **Implementations/services/integrations** — one entry per notable piece: what was built, what it does, its stack, specific enough that a session in another project can find and reuse it instead of rebuilding from scratch.
-- **Features** — notable features and how they work, when non-obvious.
-- **Ideas / future work** — things discussed or planned but not yet built.
-
-Update the hub and its linked entries (don't recreate) as the project's shape changes materially — new service added, stack migration, new dependency on/from another project.
+Update the hub and its linked entries (do not recreate them) as the project's shape changes materially (e.g., new services, stack migrations, new dependencies).
 
 ## Entry format standards
 
@@ -48,7 +36,7 @@ Every entry is one file with YAML-like frontmatter (`id`, `title`, `tags`, `type
 
 `resource`: a filesystem path — the project's folder for `hub` entries, the specific file (or module path) for everything else (`integration`, `feature`, `snippet`, ...). Omit when there's no single file/folder the entry maps to.
 
-Atomicity: `remember` enforces one decision per article via non-blocking warnings on the response — Markdown headers in `content`, more than 3 paragraphs, and size past 512 B (soft) / 1 KB (hard) all trigger a warning, though the write still succeeds. Keep content to one sentence stating the decision plus an optional short justification; split multi-decision content into separate linked entries instead.
+Atomicity: `remember` enforces one decision per article via non-blocking warnings on the response — Markdown headers in `content`, more than 3 paragraphs, and size past 512 B (soft) / 1 KB (hard) all trigger a warning, though the write still succeeds.
 
 Do not manually include or modify `valid_at`, `superseded_by`, or `supersedes` frontmatter fields.
 
@@ -248,12 +236,6 @@ tags:
 
 [Back to hub](kb://<uuid>#hub)
 ```
-
-## When to write to Engram
-
-Write to Engram only when a new fact matching the core categories has been established.
-
-Match the finding to a `type` from the table above when writing the entry.
 
 ## Memory work requires no confirmation
 

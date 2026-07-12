@@ -151,29 +151,19 @@ def register_tools(
         entry_type: str | None = None,
     ) -> dict:
         """
-        Search the knowledge base using hybrid keyword + semantic search.
-
-        Fuses SQLite FTS5 (BM25, Porter stemming) with cosine similarity
-        over local Model2Vec embeddings via Reciprocal Rank Fusion, so
-        queries that share no literal words with an entry can still find
-        it by meaning.
+        Search entries by keyword + semantic similarity.
 
         Args:
             query: Search query string.
-            tags: Optional tag filter (AND logic — all tags must match).
-            limit: Maximum results to return (default: 10).
-            include_superseded: Include entries replaced via remember's
-                supersede flag (hidden by default — they're history, not
-                current facts).
-            entry_type: Optional exact-match filter on entry type (e.g.
-                "diagnostic", "feature") — unlike tags, this is a single
-                value, not a list.
+            tags: Filter by tags (AND logic).
+            limit: Max results (default 10, capped at 100).
+            include_superseded: Include superseded entries (default False).
+            entry_type: Filter by exact entry type (e.g. "diagnostic").
 
         Returns:
-            Dict with results list (id, title, tags, type, snippet, score).
+            Dict with count and results (id, title, tags, type, snippet, score).
         """
 
-        # Clamp limit to valid range
         limit = max(1, min(limit, 100))
 
         logger.info(
@@ -192,41 +182,30 @@ def register_tools(
             entry_type=entry_type,
         )
 
-        # Search done
         return {"count": len(results), "results": results}
 
     @mcp.tool()
     def recall(entry_id: str) -> dict:
         """
-        Read the full content of a knowledge base entry.
-
-        Also returns graph relations: outgoing links (from kb://uuid#type
-        in content) and incoming backlinks (other articles linking here).
+        Read a full entry by id, with its graph relations.
 
         Args:
             entry_id: UUID of the entry.
 
         Returns:
-            Dict with id, title, tags, content, relations — or error if not found.
-            Also includes 'type', 'resource' when set on the entry. If this
-            entry was replaced via remember's supersede flag, 'superseded_by'
-            holds the newer entry's id (follow it for the current version).
-            If this entry replaced an older one, 'supersedes' holds that
-            entry's id. Relations has 'out' and 'in' lists, each with type,
-            id, title.
+            Dict with id, title, tags, content, type, resource, relations
+            (out/in lists of {type, id, title}), superseded_by/supersedes
+            when applicable, size, last_modified — or error if not found.
         """
 
         logger.info("recall: id=%s", entry_id)
 
         entry = kb.get(entry_id, with_relations=True)
         if not entry:
-            # Not found
             return {"error": f"Entry {entry_id} not found"}
 
-        # Add size metadata (bytes)
         entry["size"] = len(entry["content"].encode("utf-8"))
 
-        # Add last modified date from filesystem
         entry_file = kb.entry_path(entry_id)
         if entry_file and entry_file.exists():
             mtime = entry_file.stat().st_mtime
@@ -234,7 +213,6 @@ def register_tools(
                 mtime, tz=timezone.utc
             ).strftime("%Y-%m-%d")
 
-        # Entry retrieved
         return entry
 
     @mcp.tool()
@@ -249,63 +227,30 @@ def register_tools(
         supersede: bool = False,
     ) -> dict:
         """
-        Store or update a knowledge base entry (upsert).
+        Create or update an entry (upsert).
 
-        Resolution order:
-        1. If entry_id is provided -> update that entry
-        2. If no entry_id -> search for similar titles
-           - If a match is found -> update the best match
-           - If no match -> create a new entry
-        3. If force=True -> always create new (skip duplicate detection)
-
-        Atomicity rule: each article MUST contain exactly one piece of
-        knowledge — a single decision, fact, or procedure. The content
-        should be one sentence stating the decision, plus an optional
-        short justification. No Markdown headers, no multi-section
-        documents. If you have multiple decisions, create multiple
-        articles and link them with kb:// references.
-
-        Content policy: Engram stores ZERO discoverable information.
-        If information is derivable from code, git history, configuration
-        files, or existing documentation, it does not belong here. Engram
-        captures decisions and their context, diagnostics and their root
-        causes, procedures learned the hard way — the kind of knowledge
-        that is lost when a conversation ends. Write in affirmative style:
-        state what is, not what isn't.
-
-        Content may contain links to other entries using the format
-        [label](kb://uuid#type) where type is the relation kind (e.g.
-        runs-on, depends-on, mirrors). These links are automatically
-        indexed as graph relations, queryable via recall.
-
-        Bi-temporal history: when updating an existing entry (via entry_id
-        or duplicate match) whose fact has genuinely changed — not just a
-        wording/tag fix — pass supersede=True instead of letting this call
-        overwrite it in place. The old entry is kept as-is with
-        superseded_by set to the new entry's id; the new entry gets
-        supersedes pointing back and its own valid_at. search()/list()
-        hide superseded entries by default (include_superseded=True to see
-        history); recall() on the old id still returns its own content
-        plus superseded_by so the caller can follow the chain forward.
+        Resolution: entry_id updates that entry; otherwise a title match
+        updates the closest existing entry; no match creates a new one;
+        force=True always creates new, skipping duplicate detection.
 
         Args:
             title: Entry title.
-            content: Entry body (Markdown).
-            tags: List of tags for categorization.
-            entry_type: Required classification (e.g. hub, decision,
-                diagnostic, procedure, preference, snippet). Filterable
-                via search (type:<value>), separate from tags.
-            entry_id: Optional UUID of an existing entry to update.
-            force: Skip duplicate detection and always create new.
-            resource: Optional canonical URI for the underlying asset
-                the entry describes (e.g. a repo path or service URL).
-            supersede: Create a new version instead of overwriting the
-                matched entry in place (see "Bi-temporal history" above).
-                No-op if entry_id/force leave no existing entry to replace.
+            content: Entry body (Markdown). May link other entries via
+                [label](kb://uuid#type).
+            tags: Tags for categorization.
+            entry_type: Entry type (e.g. hub, decision, diagnostic,
+                procedure, preference, snippet). Filterable via search.
+            entry_id: UUID of an existing entry to update.
+            force: Skip duplicate detection, always create new.
+            resource: Optional path/URI the entry describes.
+            supersede: Version the matched entry instead of overwriting
+                it in place. No-op if there's no existing entry matched.
 
         Returns:
-            Dict with id, title, and action ('created', 'updated', or
-            'superseded'; 'superseded' also includes 'previous_id').
+            Dict with id, title, action (created/updated/superseded;
+            superseded also has previous_id), optional warnings
+            (atomicity/size), and suggested_links (list of {id, title,
+            score}) when similar entries exist worth cross-referencing.
         """
 
         logger.info(
@@ -328,14 +273,12 @@ def register_tools(
             supersede=supersede,
         )
 
-        # Add size metadata and atomicity warnings
         if "error" not in result:
             content_size = len(content.encode("utf-8"))
             result["size"] = content_size
 
             warnings = []
 
-            # Atomicity: no Markdown headers in content
             if re.search(r"^#{1,6} ", content, re.MULTILINE):
                 warnings.append(
                     "Article contains Markdown headers — each article "
@@ -343,7 +286,6 @@ def register_tools(
                     "articles linked with kb:// references."
                 )
 
-            # Atomicity: too many paragraphs suggests multiple topics
             paragraphs = [
                 p for p in content.split("\n\n") if p.strip()
             ]
@@ -354,7 +296,6 @@ def register_tools(
                     "plus an optional justification."
                 )
 
-            # Size thresholds
             if content_size > 1024:
                 warnings.append(
                     f"Article is {content_size} bytes — exceeds 1 KB limit. "
@@ -368,7 +309,6 @@ def register_tools(
             if warnings:
                 result["warnings"] = warnings
 
-        # Remember done
         return result
 
     @mcp.tool()
@@ -387,10 +327,8 @@ def register_tools(
 
         success = kb.delete(entry_id)
         if not success:
-            # Not found
             return {"error": f"Entry {entry_id} not found"}
 
-        # Forgotten
         return {"success": True, "id": entry_id}
 
     @mcp.tool(name="list")
@@ -413,7 +351,6 @@ def register_tools(
             Dict with entries list (id, title, tags, type).
         """
 
-        # Clamp limit to valid range
         limit = max(1, min(limit, 500))
 
         logger.info("list: tags=%s, limit=%d", tags, limit)
@@ -422,7 +359,6 @@ def register_tools(
             tags=tags, limit=limit, include_superseded=include_superseded
         )
 
-        # Listed
         return {"count": len(entries), "entries": entries}
 
     @mcp.tool()
@@ -438,7 +374,6 @@ def register_tools(
 
         tag_list = kb.list_tags()
 
-        # Tags listed
         return {"count": len(tag_list), "tags": tag_list}
 
     @mcp.tool()
@@ -470,7 +405,6 @@ def register_tools(
             }
 
         logger.info("rebuild: complete — %d entries", count)
-        # Rebuild done
         return response
 
 
