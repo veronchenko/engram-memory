@@ -29,29 +29,13 @@ Two things keep the base usable as it grows:
 ## Architecture
 
 ```
-stdio/SSE/HTTP     +----------------------+
-──────────────────>|  server.py (MCP)     |----+
-                    |  remember / recall   |    |
-                    |  search / list ...   |    |
-                    +----------------------+    |
-                                                 v
-HTTP (REST)         +----------------------+   +------------------------+
-──────────────────> |  dashboard/app.py    |-->|  KnowledgeBase          |
-                     |  FastAPI + static UI |   |  (database.py)         |
-                     +----------------------+   |  Markdown + YAML, CRUD |
-                                                 +-----------+------------+
-                                                             |
-                                                             v
-                                                 +------------------------+
-                                                 |  SQLiteBackend          |
-                                                 |  (search_backend.py)    |
-                                                 |  BM25 + Model2Vec       |
-                                                 |  embeddings via RRF     |
-                                                 |  kb:// relation graph   |
-                                                 +------------------------+
+Markdown files  --->  Search index  --->  MCP  --->  Agent
+(source of truth)     (SQLite FTS5 +      (server.py)  (Claude Code,
+                        Model2Vec,                       ChatGPT, ...)
+                        rebuildable cache)
 ```
 
-Both entry points — the MCP tools and the dashboard's REST API — sit on top of the same `KnowledgeBase`/`SQLiteBackend` pair; neither duplicates the other's logic, so `remember`/`delete` behave identically whether called by an agent or edited by hand in the browser.
+Markdown files in `<data-path>/entries/` are the only source of truth. The SQLite index (`search_backend.py`) is a disposable cache built from them — BM25 + Model2Vec embeddings fused via Reciprocal Rank Fusion, plus the `kb://` relation graph — and can always be regenerated with `rebuild`. `server.py` exposes that index to an agent as MCP tools (`remember`/`recall`/`search`/...); the dashboard is an alternate entry point at the same layer, hitting the same `KnowledgeBase`/index directly over REST instead of MCP, so `remember`/`delete` behave identically whether called by an agent or edited by hand in the browser.
 
 - **`src/server.py`** — MCP tool definitions (`remember`, `recall`, `search`, `list`, `tags`, `forget`, `rebuild`), one process, stdio/SSE/streamable-http transport
 - **`src/database.py`** — `KnowledgeBase`: Markdown + YAML frontmatter CRUD, UUID assignment, duplicate detection, bi-temporal supersede logic
