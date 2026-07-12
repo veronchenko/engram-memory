@@ -56,13 +56,41 @@ Hybrid: SQLite FTS5 (Porter stemming, BM25) fused with cosine similarity over lo
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `remember` | Create or update an entry (upsert with duplicate detection). `entry_type` is required. Returns `size` and non-blocking atomicity `warnings` (Markdown headers, >3 paragraphs, >512 B / >1 KB). | `title`, `content`, `tags`, `entry_type`, `entry_id`, `force`, `resource` |
+| `remember` | Create or update an entry (upsert with duplicate detection, or version it via `supersede`). `entry_type` is required. Returns `size`, non-blocking atomicity `warnings` (Markdown headers, >3 paragraphs, >512 B / >1 KB), and `suggested_links` — near-duplicate/related entries (by embedding similarity) worth cross-referencing with a `kb://` link. | `title`, `content`, `tags`, `entry_type`, `entry_id`, `force`, `resource`, `supersede` |
 | `recall` | Read an entry with its graph relations (outgoing + backlinks). Returns `size` and `last_modified`. | `entry_id` |
-| `search` | Hybrid keyword + semantic search with optional tag filter | `query`, `tags`, `limit` |
+| `search` | Hybrid keyword + semantic search, filterable by tags and/or exact `entry_type` | `query`, `tags`, `limit`, `include_superseded`, `entry_type` |
 | `list` | Browse entries sorted by title | `tags`, `limit` |
 | `tags` | List all tags with entry counts | — |
 | `forget` | Delete an entry (file and index) | `entry_id` |
 | `rebuild` | Rebuild search index from Markdown files | — |
+
+## Dashboard
+
+A web UI for visually exploring and hand-editing the same knowledge base the MCP tools use — no protocol duplication, every action goes through `KnowledgeBase`.
+
+![Engram dashboard — force-directed graph of entries and their kb:// relations, colored by type](docs/screenshots/dashboard-graph.png)
+
+- **Force-directed graph** of all entries and their `kb://` relations — click a node to inspect it, click a legend chip to filter by type (matches stay lit, others dim)
+- **Hybrid search** over the same BM25 + semantic index as the `search` MCP tool, with tag and `entry_type` filters
+- **CRUD panel** to create, edit, supersede, or delete entries without touching Markdown files by hand — outgoing/incoming graph relations shown alongside the fields
+
+![Engram dashboard — entry selected, showing the edit panel with title/type/tags/content and its graph relations](docs/screenshots/dashboard-entry-panel.png)
+
+- Dark, dense, no-chrome interface — a maintenance tool, not a consumer app (see `PRODUCT.md`/`DESIGN.md`)
+
+Disabled by default (the container only runs the MCP server). Enable it as a second process in the same container:
+
+```bash
+docker run -d --name engram \
+  -e ENGRAM_ENABLE_DASHBOARD=1 \
+  -p 8192 -p 8193 \
+  -v ./knowledge:/knowledge \
+  foreigndmitryi/engram --transport sse
+
+docker port engram 8193   # dashboard host port
+```
+
+Or run it standalone locally: `python -m dashboard` (see [Configuration](#configuration) for `ENGRAM_DASHBOARD_HOST`/`ENGRAM_DASHBOARD_PORT`).
 
 ## Graph Relations
 
@@ -172,6 +200,9 @@ All options have `ENGRAM_*` environment variable fallbacks. CLI args take priori
 | `--host` | `ENGRAM_HOST` | `0.0.0.0` | Listen address (SSE/HTTP) |
 | `--port` | `ENGRAM_PORT` | `8192` | Listen port (SSE/HTTP) |
 | `--embedding-model` | `ENGRAM_EMBEDDING_MODEL` | `minishlab/potion-multilingual-128M` | Model2Vec model for semantic search |
+| — | `ENGRAM_ENABLE_DASHBOARD` | unset (off) | Truthy (`1`/`true`/`yes`) starts the dashboard as a second process alongside the MCP server |
+| `--host` (dashboard) | `ENGRAM_DASHBOARD_HOST` | `0.0.0.0` | Dashboard listen address |
+| `--port` (dashboard) | `ENGRAM_DASHBOARD_PORT` | `8193` | Dashboard listen port (first free port at or above this is used) |
 
 ## Storage Format
 

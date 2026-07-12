@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0
+
+- feat: web dashboard (`src/dashboard/`) — FastAPI REST CRUD + `/api/graph` over the same `KnowledgeBase`/`SQLiteBackend` the MCP tools use, served with a single static `index.html` (vanilla JS force-directed canvas graph, no build step/CDN); disabled by default, enabled via `ENGRAM_ENABLE_DASHBOARD`, runs as a second process alongside `server.py` in the same container (`docker-entrypoint.sh`)
+- feat: bi-temporal entry versioning — `remember(..., supersede=True)` creates a new version instead of overwriting in place; `search`/`list` hide superseded entries by default (`include_superseded=True` to see history)
+- feat: `search` gains an `entry_type` filter (exact match), also exposed on the dashboard's `/api/search`
+- feat: `remember` suggests `kb://` links — returns `suggested_links` (near-duplicate/related entries by embedding similarity) for the caller to cross-reference, never auto-added
+- feat: Claude Code hooks plugin (`hooks/`) — `SessionStart`/`Stop`/`SessionEnd` handlers that nudge the agent to search Engram before starting work and to `remember` non-trivial changes before finishing; includes a `PreToolUse` gate requiring a search/recall before `remember` in the same session
+- fix: Windows `os.rename` failing when overwriting an existing entry file — replaced with an OS-safe replace
+- fix: container now exits when either the MCP backend or the dashboard process dies, instead of hanging
+- fix: backgrounding the MCP backend behind the dashboard process preserved real stdin so a stdio MCP client's input still reaches it
+
 ## 0.9.0
 
 - feat: `search` is now hybrid — SQLite FTS5 (BM25) fused with cosine similarity over local Model2Vec embeddings (`minishlab/potion-multilingual-128M`) via Reciprocal Rank Fusion, so queries that share no literal words with an entry can still find it by meaning
