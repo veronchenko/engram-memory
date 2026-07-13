@@ -1,9 +1,16 @@
 .git
 .gitignore
 .venv
+venv
 .pytest_cache
 .ruff_cache
 __pycache__
+.claude
+.impeccable
+docker-mcp-registry
+hooks
+okf
+scripts
 ci/
 docs/
 *.md
