@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs Engram's Claude Code integration (hooks + ENGRAM_MEMORY.md + onboarder agent)
-# into ~/.claude. macOS/Linux installer for the Claude Code client only — other agents
+# Installs Engram's Claude Code integration (hooks + ENGRAM_SPEC.md + ENGRAM_TEMPLATES.md
+# + onboarder agent) into ~/.claude. macOS/Linux installer for the Claude Code client only — other agents
 # (Codex, etc.) are not supported yet.
 #
 # Does NOT register the MCP server itself or wire hooks.json into settings.json — see
@@ -42,10 +42,14 @@ echo "Copying hooks/ -> $HOOKS_DEST"
 mkdir -p "$HOOKS_DEST"
 cp -R "$HOOKS_SOURCE/." "$HOOKS_DEST/"
 
-# 3. Copy ENGRAM_MEMORY.md and the onboarder agent to their live locations
-ENGRAM_MEMORY_DEST="$CLAUDE_HOME/ENGRAM_MEMORY.md"
-echo "Copying ENGRAM_MEMORY.md -> $ENGRAM_MEMORY_DEST"
-cp -f "$HOOKS_SOURCE/ENGRAM_MEMORY.md" "$ENGRAM_MEMORY_DEST"
+# 3. Copy ENGRAM_SPEC.md, ENGRAM_TEMPLATES.md and the onboarder agent to their live locations
+ENGRAM_SPEC_DEST="$CLAUDE_HOME/ENGRAM_SPEC.md"
+echo "Copying ENGRAM_SPEC.md -> $ENGRAM_SPEC_DEST"
+cp -f "$HOOKS_SOURCE/ENGRAM_SPEC.md" "$ENGRAM_SPEC_DEST"
+
+ENGRAM_TEMPLATES_DEST="$CLAUDE_HOME/ENGRAM_TEMPLATES.md"
+echo "Copying ENGRAM_TEMPLATES.md -> $ENGRAM_TEMPLATES_DEST"
+cp -f "$HOOKS_SOURCE/ENGRAM_TEMPLATES.md" "$ENGRAM_TEMPLATES_DEST"
 
 AGENTS_DIR="$CLAUDE_HOME/agents"
 mkdir -p "$AGENTS_DIR"
@@ -53,9 +57,9 @@ ONBOARDER_DEST="$AGENTS_DIR/engram-project-onboarder.md"
 echo "Copying engram-project-onboarder.md -> $ONBOARDER_DEST"
 cp -f "$HOOKS_SOURCE/engram-project-onboarder.md" "$ONBOARDER_DEST"
 
-# 4. Reference ENGRAM_MEMORY.md from CLAUDE.md via an @-import
+# 4. Reference ENGRAM_SPEC.md from CLAUDE.md via an @-import
 CLAUDE_MD_PATH="$CLAUDE_HOME/CLAUDE.md"
-IMPORT_LINE="@ENGRAM_MEMORY.md"
+IMPORT_LINE="@ENGRAM_SPEC.md"
 
 if [ ! -f "$CLAUDE_MD_PATH" ]; then
     echo "Creating $CLAUDE_MD_PATH with $IMPORT_LINE"

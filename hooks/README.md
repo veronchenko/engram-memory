@@ -1,31 +1,37 @@
 # Engram usage hooks
 
 Claude Code hooks that mechanically nudge an agent to use the Engram MCP
-memory server, instead of relying on it remembering an ENGRAM_MEMORY.md
+memory server, instead of relying on it remembering an ENGRAM_SPEC.md
 instruction every turn. Prompts are kept in sync with the rules in
-`~/.claude/ENGRAM_MEMORY.md` — update both together when that file changes.
+`~/.claude/ENGRAM_SPEC.md` — update both together when that file changes.
 
 Lives here (`~/.claude/hooks/`, not in the engram_memory repo) since it's a
 personal, global config edited directly, not a distributable repo artifact.
 
 ## Reference copies in this folder
 
-- **`ENGRAM_MEMORY.md`** — verbatim copy of `~/.claude/ENGRAM_MEMORY.md`, the
+- **`ENGRAM_SPEC.md`** — verbatim copy of `~/.claude/ENGRAM_SPEC.md`, the
   global instructions file that defines the "when to search"/"when to write"
   rules the three hooks below mechanically enforce. Kept here so the hook
   logic and the policy it's enforcing sit side by side for reading.
-  **The live file is `~/.claude/ENGRAM_MEMORY.md`** — this copy is read-only
-  reference.
+  **The live file is `~/.claude/ENGRAM_SPEC.md`** — this copy is read-only
+  reference. It pulls in `@ENGRAM_TEMPLATES.md` for the entry-type table and
+  the 9 strict templates.
+- **`ENGRAM_TEMPLATES.md`** — verbatim copy of `~/.claude/ENGRAM_TEMPLATES.md`,
+  the entry-type table and strict templates `ENGRAM_SPEC.md` imports. Split
+  out from the spec because it's pure vocabulary/wording — not enforced by
+  the server (`entry_type` is any non-empty string) — so it's the part meant
+  to be edited/replaced per user, unlike `ENGRAM_SPEC.md`.
 - **`engram-project-onboarder.md`** — verbatim copy of the
   `engram-project-onboarder` subagent definition (originally at
   `~/.claude/agents/engram-project-onboarder.md`). Referenced by
-  `ENGRAM_MEMORY.md`'s "Project hygiene" section as the agent that creates a
+  `ENGRAM_SPEC.md`'s "Project hygiene" section as the agent that creates a
   project's hub entry. Same caveat: the live copy Claude Code actually loads
   is under `~/.claude/agents/`, not here.
 
-  **Sync rule for both files above:** on install or update, hard-copy
+  **Sync rule for all three files above:** on install or update, hard-copy
   (overwrite) whichever direction is stale — never hand-merge or diff the
-  two sides. These two files (the main instruction and the onboarder agent)
+  two sides. These files (the spec, the templates, and the onboarder agent)
   are the single exception to the general "review before applying" habit:
   copy the file wholesale and move on.
 
@@ -87,11 +93,12 @@ If any script here changes location or is renamed, update the matching
 
 Windows (`scripts/install-claude-code.ps1`) and macOS/Linux
 (`scripts/install-claude-code.sh`) each automate steps 1, 3 and 4 below
-(knowledge base directory, `hooks/` copy, `ENGRAM_MEMORY.md` +
-`engram-project-onboarder.md` copy, and the `@ENGRAM_MEMORY.md` import in
-`CLAUDE.md`). Steps 2, 5, 6 (MCP server registration, `settings.json` hook
-wiring, disabling built-in auto memory) are still manual — the script prints
-a reminder for them. Only Claude Code is supported so far.
+(knowledge base directory, `hooks/` copy, `ENGRAM_SPEC.md` +
+`ENGRAM_TEMPLATES.md` + `engram-project-onboarder.md` copy, and the
+`@ENGRAM_SPEC.md` import in `CLAUDE.md`). Steps 2, 5, 6 (MCP server
+registration, `settings.json` hook wiring, disabling built-in auto memory)
+are still manual — the script prints a reminder for them. Only Claude Code
+is supported so far.
 
 1. Copy this whole `hooks/` folder to `~/.claude/hooks/` (i.e.
    `C:/Users/<user>/.claude/hooks/` on Windows). The scripts assume they live
@@ -145,9 +152,10 @@ a reminder for them. Only Claude Code is supported so far.
    run; a `PreToolUse` matcher only applies to tool names it matches, so an
    existing broader/different matcher and this one coexist as separate array
    entries.
-4. Make sure `~/.claude/ENGRAM_MEMORY.md` exists and is `@`-imported from
-   `~/.claude/CLAUDE.md` — the hook prompts assume those rules are the ones
-   in force and are kept in sync with them.
+4. Make sure `~/.claude/ENGRAM_SPEC.md` and `~/.claude/ENGRAM_TEMPLATES.md`
+   exist and `ENGRAM_SPEC.md` is `@`-imported from `~/.claude/CLAUDE.md` —
+   the hook prompts assume those rules are the ones in force and are kept
+   in sync with them.
 5. Verify `python` resolves on PATH for whatever shell Claude Code invokes
    hooks in (the commands call `python`, not a specific interpreter path).
 6. Disable Claude Code's own built-in auto memory (`MEMORY.md` under

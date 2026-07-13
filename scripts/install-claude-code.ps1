@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installs Engram's Claude Code integration (hooks + ENGRAM_MEMORY.md + onboarder agent) into ~/.claude.
+    Installs Engram's Claude Code integration (hooks + ENGRAM_SPEC.md + ENGRAM_TEMPLATES.md + onboarder agent) into ~/.claude.
 
 .DESCRIPTION
     Windows-only installer for the Claude Code client. Other agents (Codex, etc.) are not
@@ -49,10 +49,14 @@ Write-Host "Copying hooks/ -> $hooksDest"
 New-Item -ItemType Directory -Path $hooksDest -Force | Out-Null
 Copy-Item -Path (Join-Path $hooksSource "*") -Destination $hooksDest -Recurse -Force
 
-# 3. Copy ENGRAM_MEMORY.md and the onboarder agent to their live locations
-$engramMemoryDest = Join-Path $ClaudeHome "ENGRAM_MEMORY.md"
-Write-Host "Copying ENGRAM_MEMORY.md -> $engramMemoryDest"
-Copy-Item -Path (Join-Path $hooksSource "ENGRAM_MEMORY.md") -Destination $engramMemoryDest -Force
+# 3. Copy ENGRAM_SPEC.md, ENGRAM_TEMPLATES.md and the onboarder agent to their live locations
+$engramSpecDest = Join-Path $ClaudeHome "ENGRAM_SPEC.md"
+Write-Host "Copying ENGRAM_SPEC.md -> $engramSpecDest"
+Copy-Item -Path (Join-Path $hooksSource "ENGRAM_SPEC.md") -Destination $engramSpecDest -Force
+
+$engramTemplatesDest = Join-Path $ClaudeHome "ENGRAM_TEMPLATES.md"
+Write-Host "Copying ENGRAM_TEMPLATES.md -> $engramTemplatesDest"
+Copy-Item -Path (Join-Path $hooksSource "ENGRAM_TEMPLATES.md") -Destination $engramTemplatesDest -Force
 
 $agentsDir = Join-Path $ClaudeHome "agents"
 if (-not (Test-Path $agentsDir)) {
@@ -62,9 +66,9 @@ $onboarderDest = Join-Path $agentsDir "engram-project-onboarder.md"
 Write-Host "Copying engram-project-onboarder.md -> $onboarderDest"
 Copy-Item -Path (Join-Path $hooksSource "engram-project-onboarder.md") -Destination $onboarderDest -Force
 
-# 4. Reference ENGRAM_MEMORY.md from CLAUDE.md via an @-import
+# 4. Reference ENGRAM_SPEC.md from CLAUDE.md via an @-import
 $claudeMdPath = Join-Path $ClaudeHome "CLAUDE.md"
-$importLine = "@ENGRAM_MEMORY.md"
+$importLine = "@ENGRAM_SPEC.md"
 
 if (-not (Test-Path $claudeMdPath)) {
     Write-Host "Creating $claudeMdPath with $importLine"
