@@ -85,6 +85,14 @@ If any script here changes location or is renamed, update the matching
 
 ## Setup (fresh machine / new global config)
 
+Windows (`scripts/install-claude-code.ps1`) and macOS/Linux
+(`scripts/install-claude-code.sh`) each automate steps 1, 3 and 4 below
+(knowledge base directory, `hooks/` copy, `ENGRAM_MEMORY.md` +
+`engram-project-onboarder.md` copy, and the `@ENGRAM_MEMORY.md` import in
+`CLAUDE.md`). Steps 2, 5, 6 (MCP server registration, `settings.json` hook
+wiring, disabling built-in auto memory) are still manual — the script prints
+a reminder for them. Only Claude Code is supported so far.
+
 1. Copy this whole `hooks/` folder to `~/.claude/hooks/` (i.e.
    `C:/Users/<user>/.claude/hooks/` on Windows). The scripts assume they live
    there — `_hooklog.py` writes to `hooks/logs/debug.log` next to itself.
