@@ -26,6 +26,27 @@ Two things keep the base usable as it grows:
 - **Three transports** — stdio (agent-managed), SSE, streamable-http — so the same server works for a single local agent or a shared multi-agent deployment
 - **Markdown as source of truth** — the SQLite index is a rebuildable cache; delete it and `rebuild`, no data is ever lost
 
+## Comparison
+
+| | Engram | Mem0 | Zep / Graphiti | LangMem |
+|---|---|---|---|---|
+| Source of truth | Markdown files on disk | Vector DB / managed API | Temporal knowledge graph | Vector store (LangChain-backed) |
+| Search | BM25 + local Model2Vec embeddings (RRF fusion) | Vector similarity | Graph traversal + embeddings | Vector similarity |
+| Relations | Explicit `kb://uuid#type` links, agent-authored | Implicit (LLM-extracted facts) | Auto-extracted temporal graph edges | None built-in |
+| Temporal model | Bi-temporal `valid_at`/`supersede` on write | Fact overwrite | Native temporal graph (bi-temporal edges) | None built-in |
+| Deployment | Self-hosted, single Docker image, no cloud dependency | Hosted API or self-hosted + vector DB | Self-hosted, needs Neo4j | Library, no server |
+| Design center | Deliberately minimal — zero discoverable info, agent decides what's worth keeping | Automatic fact extraction from conversations | Automatic entity/relationship extraction | Composable memory primitives for LangGraph agents |
+
+Engram trades automatic extraction (Mem0, Zep) for an agent-curated, atomic, explicitly-linked knowledge base — no LLM-driven ingestion pipeline, no graph database dependency, and the on-disk Markdown stays human-readable and diffable.
+
+## Design Patterns
+
+- **Reciprocal Rank Fusion** — BM25 and embedding rankings are computed independently and merged by rank position rather than raw score, avoiding the need to normalize incomparable similarity metrics.
+- **Rebuildable cache over source of truth** — the SQLite index is fully derived from the Markdown files (`rebuild` regenerates it from scratch); the database is never the only copy of a fact.
+- **Bi-temporal versioning** — `supersede` writes a new entry and points the old one at it via `superseded_by`, instead of overwriting in place, so history stays queryable (`include_superseded`).
+- **HATEOAS-style graph traversal** — every `recall` response carries its own outgoing/incoming `kb://` links, so navigating the knowledge graph doesn't require a separate query per hop.
+- **Shared domain layer, two transports** — the dashboard's REST API and the MCP tools both call the same `KnowledgeBase`/`SQLiteBackend` methods, so there is exactly one code path for writes regardless of which surface triggered them.
+
 ## Architecture
 
 ```
@@ -109,14 +130,9 @@ Hybrid: SQLite FTS5 (Porter stemming, BM25) fused with cosine similarity over lo
 
 A web UI for visually exploring and hand-editing the same knowledge base the MCP tools use — no protocol duplication, every action goes through `KnowledgeBase`.
 
-![Engram dashboard — force-directed graph of entries and their kb:// relations, colored by type](docs/screenshots/dashboard-graph.png)
-
 - **Force-directed graph** of all entries and their `kb://` relations — click a node to inspect it, click a legend chip to filter by type (matches stay lit, others dim)
 - **Hybrid search** over the same BM25 + semantic index as the `search` MCP tool, with tag and `entry_type` filters
 - **CRUD panel** to create, edit, supersede, or delete entries without touching Markdown files by hand — outgoing/incoming graph relations shown alongside the fields
-
-![Engram dashboard — entry selected, showing the edit panel with title/type/tags/content and its graph relations](docs/screenshots/dashboard-entry-panel.png)
-
 - Dark, dense, no-chrome interface — a maintenance tool, not a consumer app (see `PRODUCT.md`/`DESIGN.md`)
 
 Disabled by default (the container only runs the MCP server). Enable it as a second process in the same container:
