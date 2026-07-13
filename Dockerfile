@@ -9,26 +9,31 @@ FROM python:3.13-alpine
 
 WORKDIR /app
 
+# Non-root user, created up front so the model cache below can be written
+# with correct ownership directly instead of via a later `chown -R`, which
+# would force the overlay filesystem to duplicate the ~1GB cache layer.
+RUN addgroup -S engram && adduser -S engram -G engram
+
 # Install Python dependencies
 COPY src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the embedding model into the image so runtime and tests
-# never need network access for it (cache dir chowned to engram below).
-# Done before COPY src/ so editing app code doesn't invalidate this layer
-# and force a re-download.
+# never need network access for it. Done before COPY src/ so editing app
+# code doesn't invalidate this layer and force a re-download. Runs as
+# engram so the cache lands with correct ownership from the start.
 ENV HF_HOME=/app/.cache/huggingface
+RUN mkdir -p "$HF_HOME" && chown -R engram:engram /app/.cache
+USER engram
 RUN python -c "from model2vec import StaticModel; StaticModel.from_pretrained('minishlab/potion-multilingual-128M')"
+USER root
 
 # Copy application
 COPY src/ ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Non-root user
-RUN addgroup -S engram && adduser -S engram -G engram
 RUN mkdir -p /knowledge && chown engram:engram /knowledge
-RUN chown -R engram:engram /app/.cache
 USER engram
 
 # Default configuration (override via docker run -e or --arg)
