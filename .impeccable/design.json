@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-09T00:00:00Z",
+  "title": "Design System: Engram Dashboard",
+  "extensions": {
+    "colorMeta": {
+      "bg": { "role": "neutral", "displayName": "Void", "canonical": "oklch(0.16 0.018 260)", "tonalRamp": ["oklch(0.10 0.015 260)", "oklch(0.16 0.018 260)", "oklch(0.205 0.018 260)", "oklch(0.245 0.02 260)", "oklch(0.28 0.02 260)", "oklch(0.42 0.02 260)", "oklch(0.55 0.018 260)", "oklch(0.755 0.018 260)"] },
+      "surface": { "role": "neutral", "displayName": "Panel", "canonical": "oklch(0.205 0.018 260)", "tonalRamp": ["oklch(0.16 0.018 260)", "oklch(0.205 0.018 260)", "oklch(0.245 0.02 260)", "oklch(0.28 0.02 260)", "oklch(0.32 0.02 260)", "oklch(0.42 0.02 260)", "oklch(0.6 0.018 260)", "oklch(0.8 0.01 260)"] },
+      "surface-hover": { "role": "neutral", "displayName": "Panel Hover", "canonical": "oklch(0.245 0.02 260)" },
+      "surface-active": { "role": "neutral", "displayName": "Panel Active", "canonical": "oklch(0.28 0.02 260)" },
+      "border": { "role": "neutral", "displayName": "Border", "canonical": "oklch(0.32 0.02 260)" },
+      "border-strong": { "role": "neutral", "displayName": "Border Strong", "canonical": "oklch(0.42 0.02 260)" },
+      "text": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(0.93 0.008 260)" },
+      "text-muted": { "role": "neutral", "displayName": "Ink Muted", "canonical": "oklch(0.755 0.018 260)" },
+      "text-faint": { "role": "neutral", "displayName": "Ink Faint", "canonical": "oklch(0.55 0.018 260)" },
+      "accent": { "role": "primary", "displayName": "Signal Blue", "canonical": "oklch(0.745 0.135 250)", "tonalRamp": ["oklch(0.22 0.06 250)", "oklch(0.32 0.09 250)", "oklch(0.42 0.11 250)", "oklch(0.52 0.13 250)", "oklch(0.62 0.135 250)", "oklch(0.745 0.135 250)", "oklch(0.8 0.13 250)", "oklch(0.9 0.06 250)"] },
+      "accent-strong": { "role": "primary", "displayName": "Signal Blue Strong", "canonical": "oklch(0.8 0.13 250)" },
+      "accent-ink": { "role": "primary", "displayName": "Signal Blue Ink", "canonical": "oklch(0.18 0.03 250)" },
+      "danger": { "role": "semantic", "displayName": "Danger Red", "canonical": "oklch(0.665 0.19 25)", "tonalRamp": ["oklch(0.2 0.08 25)", "oklch(0.3 0.12 25)", "oklch(0.4 0.15 25)", "oklch(0.5 0.17 25)", "oklch(0.58 0.19 25)", "oklch(0.665 0.19 25)", "oklch(0.75 0.16 25)", "oklch(0.88 0.08 25)"] },
+      "danger-ink": { "role": "semantic", "displayName": "Danger Ink", "canonical": "oklch(0.18 0.02 25)" },
+      "success": { "role": "semantic", "displayName": "Success Green", "canonical": "oklch(0.72 0.15 150)" }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Panel headings only (Edit entry / New entry)." },
+      "body": { "displayName": "Body/UI", "purpose": "Buttons, canvas node labels, dominant UI text." },
+      "label": { "displayName": "Label", "purpose": "Form labels, legend, checkboxes, search snippets." },
+      "micro": { "displayName": "Micro", "purpose": "Meta line: entry id, last-modified timestamp." }
+    },
+    "shadows": [
+      { "name": "panel", "value": "0 12px 32px oklch(0 0 0 / 0.4)", "purpose": "The side panel, its mobile slide-over, and the search-results dropdown." },
+      { "name": "toast", "value": "0 8px 20px oklch(0 0 0 / 0.35)", "purpose": "Toast notifications only." }
+    ],
+    "motion": [
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Default easing for all state transitions and toast/panel motion." },
+      { "name": "duration-fast", "value": "150ms", "purpose": "Border/background hover transitions." },
+      { "name": "duration-base", "value": "220ms", "purpose": "Panel slide-over, toast in/out." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "720px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single primary action per view (New entry, Create, Save).",
+      "html": "<button class=\"ds-btn-primary\">+ New entry</button>",
+      "css": ".ds-btn-primary { background: oklch(0.745 0.135 250); color: oklch(0.18 0.03 250); border: 1px solid oklch(0.745 0.135 250); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 600; font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0.16,1,0.3,1), border-color 150ms cubic-bezier(0.16,1,0.3,1), transform 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { background: oklch(0.8 0.13 250); border-color: oklch(0.8 0.13 250); } .ds-btn-primary:focus-visible { outline: 2px solid oklch(0.745 0.135 250); outline-offset: 2px; } .ds-btn-primary:active { transform: scale(0.98); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The default button everywhere that isn't the single primary action.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { background: oklch(0.205 0.018 260); color: oklch(0.93 0.008 260); border: 1px solid oklch(0.32 0.02 260); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0.16,1,0.3,1), border-color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-secondary:hover { background: oklch(0.245 0.02 260); border-color: oklch(0.42 0.02 260); } .ds-btn-secondary:focus-visible { outline: 2px solid oklch(0.745 0.135 250); outline-offset: 2px; } .ds-btn-secondary:active { background: oklch(0.28 0.02 260); transform: scale(0.98); }"
+    },
+    {
+      "name": "Danger Button (armed)",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Delete action; a second click within 4s confirms. Shown here in its armed/confirming state.",
+      "html": "<button class=\"ds-btn-danger ds-armed\">Confirm delete?</button>",
+      "css": ".ds-btn-danger { background: oklch(0.205 0.018 260); color: oklch(0.665 0.19 25); border: 1px solid oklch(0.32 0.02 260); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0.16,1,0.3,1), color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-danger.ds-armed { background: oklch(0.665 0.19 25); color: oklch(0.18 0.02 25); border-color: oklch(0.665 0.19 25); }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Search box, tag filter, form title/tags/resource inputs.",
+      "html": "<input class=\"ds-field\" type=\"text\" placeholder=\"Search entries…\">",
+      "css": ".ds-field { background: oklch(0.205 0.018 260); border: 1px solid oklch(0.32 0.02 260); color: oklch(0.93 0.008 260); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.875rem; font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; transition: border-color 150ms cubic-bezier(0.16,1,0.3,1), background 150ms cubic-bezier(0.16,1,0.3,1); } .ds-field::placeholder { color: oklch(0.755 0.018 260); } .ds-field:hover { border-color: oklch(0.42 0.02 260); } .ds-field:focus-visible { outline: none; border-color: oklch(0.745 0.135 250); background: oklch(0.245 0.02 260); }"
+    },
+    {
+      "name": "Side Panel",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "Docked entry-edit surface on the right; square corners, floats via shadow, not radius.",
+      "html": "<div class=\"ds-panel\"><h2 class=\"ds-panel-title\">Edit entry</h2><p class=\"ds-panel-body\">Panel content sits flush against the canvas.</p></div>",
+      "css": ".ds-panel { width: 320px; background: oklch(0.205 0.018 260); border-left: 1px solid oklch(0.32 0.02 260); box-shadow: 0 12px 32px oklch(0 0 0 / 0.4); padding: 1.5rem; font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; } .ds-panel-title { margin: 0 0 0.25rem; font-size: 1.125rem; font-weight: 600; color: oklch(0.93 0.008 260); } .ds-panel-body { font-size: 0.8125rem; color: oklch(0.755 0.018 260); line-height: 1.5; }"
+    },
+    {
+      "name": "Toast (error)",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "The one sanctioned colored-left-border element in the system; severity-coded.",
+      "html": "<div class=\"ds-toast ds-toast-error\"><span>Search failed</span><button class=\"ds-toast-dismiss\" aria-label=\"Dismiss\">&times;</button></div>",
+      "css": ".ds-toast { background: oklch(0.205 0.018 260); border: 1px solid oklch(0.32 0.02 260); border-left: 3px solid oklch(0.745 0.135 250); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.8125rem; color: oklch(0.93 0.008 260); box-shadow: 0 8px 20px oklch(0 0 0 / 0.35); display: flex; align-items: flex-start; gap: 0.5rem; font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; } .ds-toast-error { border-left-color: oklch(0.665 0.19 25); } .ds-toast-dismiss { background: none; border: none; padding: 0; color: oklch(0.55 0.018 260); font-size: 1.125rem; line-height: 1; margin-left: auto; cursor: pointer; } .ds-toast-dismiss:hover { color: oklch(0.93 0.008 260); }"
+    },
+    {
+      "name": "Legend Chip (active)",
+      "kind": "chip",
+      "refersTo": "legend-item",
+      "description": "Type filter chip on the graph canvas; shown in its active/selected state.",
+      "html": "<button class=\"ds-chip ds-chip-active\"><span class=\"ds-chip-dot\"></span>feature</button>",
+      "css": ".ds-chip { display: flex; align-items: center; gap: 0.5rem; background: none; border: 1px solid transparent; border-radius: 6px; padding: 0.25rem 0.5rem; font-size: 0.75rem; color: oklch(0.755 0.018 260); font-family: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0.16,1,0.3,1), border-color 150ms cubic-bezier(0.16,1,0.3,1), color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: #6ea8fe; } .ds-chip-active { background: oklch(0.28 0.02 260); border-color: oklch(0.42 0.02 260); color: oklch(0.93 0.008 260); font-weight: 600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Control Room",
+    "overview": "The Engram Dashboard is a dark instrument panel for watching and steering a live knowledge graph, not a marketing surface or a consumer app. Every element on screen is a readout or a control: the canvas is the main viewport, the topbar is a strip of instruments (search, filter, status spinner), the side panel is a form for direct edits. Nothing exists to be admired — it exists to be read at a glance and acted on in seconds, matching PRODUCT.md's 'technical and minimal... every pixel earns its place' personality. This system explicitly rejects the generic-SaaS-admin template feel named in PRODUCT.md's anti-references: no bootstrap-y card grids, no dashboard-in-a-box CRUD-table-with-sidebar layout, no elements that exist to look impressive rather than to work.",
+    "keyCharacteristics": [
+      "Near-black desaturated blue base (oklch(0.16 0.018 260)), never pure black or warm neutral.",
+      "One accent color (signal blue) used sparingly, only for primary actions and active/matched states.",
+      "Flat tonal layering for structure; shadows reserved for two floating surfaces only.",
+      "Fixed rem type scale, no fluid/clamp headlines — this is a UI, not editorial content.",
+      "Fast, subtle motion (150–220ms, ease-out-expo) on hover/focus/state changes only."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Signal Blue is the only saturated hue in active use. It never appears as decoration — only on the element the user is meant to act on or that is currently selected/matched.", "section": "colors" },
+      { "name": "The No-Warm-Neutral Rule", "body": "Every neutral in the scale is a desaturated blue (hue 260), never shifted warm. The system reads as instrument-panel cool, deliberately, never cozy.", "section": "colors" },
+      { "name": "The Fixed-Scale Rule", "body": "All type sizes are fixed rem values, never clamp() or viewport units. This is a tool rendered at a known density, not editorial content that reflows across devices.", "section": "typography" },
+      { "name": "The Float-Only Rule", "body": "A shadow appears only on an element that visually floats above the canvas (panel, dropdown, toast). An element that sits in the normal document flow never gets one, no matter how 'important' it is.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep Signal Blue (oklch(0.745 0.135 250)) as the only saturated color in routine use — primary actions, active states, links.",
+      "Do build depth with the surface ladder (bg/surface/surface-hover/surface-active) before reaching for a shadow.",
+      "Do use the 3px solid left-border accent on toasts only — it is the one sanctioned 'colored stripe' in the whole system.",
+      "Do keep transitions in the 150–220ms range on ease-out-expo; no bounce, no elastic.",
+      "Do respect prefers-reduced-motion (already collapsed to 0.01ms globally) on any new animated element."
+    ],
+    "donts": [
+      "Don't build a generic SaaS admin template — no bootstrap-y card grids, no dashboard-in-a-box CRUD-table-with-sidebar layout, per PRODUCT.md's anti-reference.",
+      "Don't add a second saturated accent color; new semantic states reuse danger/success, they don't invent a third hue.",
+      "Don't put a colored border-left/border-right stripe on anything except a toast — not on cards, list rows, or callouts.",
+      "Don't add a shadow to anything that isn't the panel, its dropdown, or a toast — flat surfaces stay flat.",
+      "Don't introduce a warm-tinted neutral; every gray in this system is desaturated blue (hue 260), never warm.",
+      "Don't use clamp()/fluid type or a display font — this UI has a fixed rem scale and one system-font stack, no editorial typography.",
+      "Don't round the side panel's corners or float it as a card — it's a docked instrument with square corners."
+    ]
+  }
+}
