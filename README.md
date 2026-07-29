@@ -2,7 +2,7 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents persistent memory. Markdown files as source of truth, hybrid keyword + semantic search, typed graph relations.
 
-**Website:** [engram-kb.org](https://engram-kb.org) · **Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram)
+**Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram)
 
 ## Concept
 
@@ -16,9 +16,11 @@ Two things keep the base usable as it grows:
 
 ## Features
 
-- **Hybrid search** — SQLite FTS5 (BM25, Porter stemming) fused with cosine similarity over local Model2Vec embeddings via Reciprocal Rank Fusion; finds entries by meaning, not just shared keywords, with zero cloud dependency
-- **Typed graph relations** — `kb://uuid#type` links between entries, resolved both directions (outgoing + backlinks) on every `recall`
-- **Entry types** — `hub`, `decision`, `diagnostic`, `procedure`, `preference`, `snippet`, ... — required on write, filterable on search/list
+- **Hybrid search** — SQLite FTS5 (BM25, Porter stemming) fused with cosine similarity over local Model2Vec embeddings *and* an IDF-weighted exact-match channel over title/tags via Reciprocal Rank Fusion; finds entries by meaning or by a literal proper noun BM25/embeddings alone would dilute among lexically-similar distractors, with zero cloud dependency
+- **Typed graph relations** — `kb://uuid#type` links between entries, resolved both directions (outgoing + backlinks) on every `recall`, with an optional second hop (`hops=2`) to see how two entries connect through an intermediate one
+- **Schema-enforced entry types** — `hub`, `decision`, `diagnostic`, `feature`, `procedure`, `integration`, `pattern`, `snippet`, `preference`, `idea` — declared in `schema.json` and exposed to the client as an enum, so an invalid type can't be written; filterable on search/list
+- **`doctor` integrity pass** — one schema-driven check over the Markdown files for dangling and superseded links, undeclared types, missing template fields, supernodes, and tag/type collisions
+- **`part_of` structural membership** — links a detail entry (`decision`, `diagnostic`, `feature`, `procedure`, `integration`, ...) to its hub, enforced per type by the schema; filterable on `search`/`list`, grouped alongside `kb://` back-links in a hub's `recall` digest
 - **Bi-temporal versioning** — `remember(..., supersede=True)` creates a new version instead of overwriting; old versions stay in history (`include_superseded=True`) instead of being lost
 - **Duplicate detection & link suggestions** — `remember` matches near-identical titles to avoid duplicate entries, and returns `suggested_links` (embedding-similarity matches) so related facts get cross-referenced instead of orphaned
 - **Atomicity guardrails** — non-blocking warnings on structural anti-patterns (headers, >3 paragraphs, oversized content) so the base stays one-fact-per-entry as it scales
@@ -39,6 +41,54 @@ Two things keep the base usable as it grows:
 
 Engram trades automatic extraction (Mem0, Zep) for an agent-curated, atomic, explicitly-linked knowledge base — no LLM-driven ingestion pipeline, no graph database dependency, and the on-disk Markdown stays human-readable and diffable.
 
+## Measured Against a Plain Markdown Wiki
+
+Engram was benchmarked against the same knowledge base packaged as an ordinary Markdown wiki — one file per topic, organized in folders by project and category (decision, diagnostic, feature, procedure, ...), each project with an index page and cross-links between related pages, browsed with `Read`/`Grep`/`Glob`/`Bash`. Same content, two ways of finding it — for equivalent fact coverage, Engram's `search`/`recall` used:
+
+| | Engram | Wiki | Improvement |
+|---|---|---|---|
+| Tool calls | 104 | 186 | **-44%** |
+| Total tokens | 3.87M | 5.91M | **-35%** |
+| Cost | $1.31 | $1.62 | **-19%** |
+| Wall time (sum) | 577s | 760s | **-24%** |
+| Fact rate | 1.000 | 0.964 | **+3.7%** |
+
+32 questions (single-hop, multi-hop, negative, cross-lingual, supersede) over **5,070 entries** — 70 curated facts across 4 fictional projects plus 5,000 real-text distractor entries, so retrieval has to work at a scale that doesn't fit in an agent's context:
+
+```
+wiki/
+├── Ledgerbird/                       )
+├── Pipewren/                         )  4 curated projects — 70 real
+├── Snipfox/                          )  decisions/diagnostics/features/
+├── Featherstore/                     )  procedures/integrations/snippets
+│   ├── README.md                        <- project index page, links to every entry below
+│   ├── decision/
+│   │   ├── offline-engine-duckdb-over-spark.md
+│   │   ├── online-value-serialization-msgpack.md
+│   │   └── ... (2 more)
+│   ├── diagnostic/
+│   │   ├── redis-memory-doubling-from-ttl-less-deprecated-feature-groups.md
+│   │   └── training-serving-skew-from-tz-naive-event-timestamps.md
+│   ├── feature/       (4 entries)
+│   ├── integration/   (2 entries)
+│   ├── procedure/     (1 entry)
+│   └── snippet/       (1 entry)
+├── _shared/                             cross-project patterns & preferences
+└── haystack-project-00000.../00199/     200 distractor projects x 25 pages
+    │                                     = 5,000 real-text (Wikipedia) pages
+    ├── README.md                        <- same index-page shape as a real project
+    ├── decision/   (2 entries)
+    ├── feature/    (3 entries)
+    ├── idea/       (7 entries)
+    ├── pattern/    (4 entries)
+    ├── procedure/  (1 entry)
+    └── snippet/    (2 entries)
+```
+
+Every category folder is a flat list of one-file-per-entry, and every project folder (real or distractor) has its own `README.md` index page linking to all of them — structurally identical, so the wiki arm can't tell curated fact from distractor by shape alone.
+
+An agent that already knows *where* to look doesn't need to `grep`, re-read, and re-`grep` its way there — the efficiency edge holds for equivalent fact coverage. Retrieval ranking has also been improving: adding an IDF-weighted exact-match channel (below) moved MRR from 0.851 to 0.857 and recall@5 from 0.851 to 0.869, with no regression across any language.
+
 ## Design Patterns
 
 - **Reciprocal Rank Fusion** — BM25 and embedding rankings are computed independently and merged by rank position rather than raw score, avoiding the need to normalize incomparable similarity metrics.
@@ -58,11 +108,13 @@ Markdown files  --->  Search index  --->  MCP  --->  Agent
 
 Markdown files in `<data-path>/entries/` are the only source of truth. The SQLite index (`search_backend.py`) is a disposable cache built from them — BM25 + Model2Vec embeddings fused via Reciprocal Rank Fusion, plus the `kb://` relation graph — and can always be regenerated with `rebuild`. `server.py` exposes that index to an agent as MCP tools (`remember`/`recall`/`search`/...); the dashboard is an alternate entry point at the same layer, hitting the same `KnowledgeBase`/index directly over REST instead of MCP, so `remember`/`delete` behave identically whether called by an agent or edited by hand in the browser.
 
-- **`src/server.py`** — MCP tool definitions (`remember`, `recall`, `search`, `list`, `tags`, `forget`, `rebuild`), one process, stdio/SSE/streamable-http transport
+- **`src/server.py`** — MCP tool definitions (`remember`, `recall`, `search`, `list`, `tags`, `forget`, `rebuild`, `doctor`), one process, stdio/SSE/streamable-http transport
 - **`src/database.py`** — `KnowledgeBase`: Markdown + YAML frontmatter CRUD, UUID assignment, duplicate detection, bi-temporal supersede logic
+- **`src/schema.json` + `src/schema.py`** — the entry taxonomy and its per-type rules as data, plus the loader that turns them into the `entry_type` enum the MCP client validates against
+- **`src/doctor.py`** — the schema-driven integrity pass shared by the `doctor` tool, `rebuild`'s warnings, and `remember`'s conformance check
 - **`src/search_backend.py`** — `SQLiteBackend`: BM25 (FTS5) fused with Model2Vec cosine similarity via Reciprocal Rank Fusion, plus `kb://` relation extraction/graph traversal; embeddings are computed lazily on write and stored as a BLOB column
 - **`src/dashboard/`** — a second, optional process (`app.py` FastAPI REST + `/api/graph`, `static/index.html` vanilla-JS canvas graph, `__main__.py` its own uvicorn entry point) reusing the same `KnowledgeBase`
-- **`hooks/`** — a self-contained Claude Code plugin (`SessionStart`/`Stop`/`SessionEnd` + a `PreToolUse` search-before-remember gate) that mechanically enforces the search-first, remember-after workflow instead of relying on a system prompt alone
+- **`plugins/engram-hooks/`** — a self-contained plugin installable in both Claude Code and Codex (`.claude-plugin/plugin.json`, `SessionStart`/`Stop`/`SessionEnd` + a `PreToolUse` search-before-remember gate, plus a Claude-Code-only `engram-project-onboarder` agent) that mechanically enforces the search-first, remember-after workflow instead of relying on a system prompt alone; listed as `engram-hooks` in both the repo-root `.claude-plugin/marketplace.json` (Claude Code) and `plugins/marketplace.json` (Codex)
 
 In Docker, the MCP server and the dashboard run as two processes in one container (`docker-entrypoint.sh`), sharing the same `/knowledge` volume; the container exits if either process dies.
 
@@ -118,13 +170,20 @@ Hybrid: SQLite FTS5 (Porter stemming, BM25) fused with cosine similarity over lo
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `remember` | Create or update an entry (upsert with duplicate detection, or version it via `supersede`). `entry_type` is required. Returns `size`, non-blocking atomicity `warnings` (Markdown headers, >3 paragraphs, >512 B / >1 KB), and `suggested_links` — near-duplicate/related entries (by embedding similarity) worth cross-referencing with a `kb://` link. | `title`, `content`, `tags`, `entry_type`, `entry_id`, `force`, `resource`, `supersede` |
-| `recall` | Read an entry with its graph relations (outgoing + backlinks). Returns `size` and `last_modified`. | `entry_id` |
-| `search` | Hybrid keyword + semantic search, filterable by tags and/or exact `entry_type` | `query`, `tags`, `limit`, `include_superseded`, `entry_type` |
-| `list` | Browse entries sorted by title | `tags`, `limit` |
+| `remember` | Create or update an entry (upsert with duplicate detection, or version it via `supersede`). `entry_type` is required, and `part_of` (hub UUIDs) is required/optional/rejected per type per the schema's `membership` rule. Returns `size`, non-blocking atomicity `warnings` (Markdown headers, >3 paragraphs, >512 B / >1 KB), and `suggested_links` — near-duplicate/related entries (by embedding similarity) worth cross-referencing with a `kb://` link. | `title`, `content`, `tags`, `entry_type`, `entry_id`, `force`, `resource`, `supersede`, `part_of` |
+| `recall` | Read an entry with its graph relations (outgoing + backlinks). Returns `size` and `last_modified`. High-degree types (hubs) return `in_digest` — back-links grouped by linking type, plus members grouped by `part_of` — instead of an arbitrarily truncated list. | `entry_id`, `relations_limit` |
+| `search` | Hybrid keyword + semantic search, filterable by tags, exact `entry_type`, and/or `part_of` | `query`, `tags`, `limit`, `include_superseded`, `entry_type`, `part_of` |
+| `list` | Browse entries sorted by title, filterable by tags, exact `entry_type`, and/or `part_of` | `tags`, `limit`, `include_superseded`, `entry_type`, `part_of` |
 | `tags` | List all tags with entry counts | — |
-| `forget` | Delete an entry (file and index) | `entry_id` |
-| `rebuild` | Rebuild search index from Markdown files | — |
+| `forget` | Delete an entry (file and index). Warns when other entries still link to it. | `entry_id` |
+| `rebuild` | Rebuild search index from Markdown files; also runs `doctor` | — |
+| `doctor` | Check every entry against `schema.json`: dangling/superseded `kb://` targets, undeclared types, missing required frontmatter and template body fields, supernodes, tag/type collisions | — |
+
+### Entry schema
+
+The entry taxonomy and its per-type rules live in `schema.json`, not in Python: which frontmatter fields a type requires, which template body fields it should carry, whether search may boost it by usage, and whether `recall` digests its back-links. `entry_type` is exposed to the MCP client as an enum built from that schema, so an undeclared type is rejected before the call reaches the server.
+
+Resolution order, first found wins: `<data-path>/schema.json`, then the packaged `src/schema.json`. A user file **replaces** the packaged one outright — the two are never merged, so copy the default and edit it. The schema is read once at startup, so editing it requires restarting the server. Entries written by hand can still carry an undeclared type; `doctor` reports those.
 
 ## Dashboard
 
@@ -232,7 +291,7 @@ After making an architecture decision: remember the choice and the rationale.
 After discovering something about the infrastructure: remember it.
 ```
 
-A system prompt is easy to forget mid-session. For Claude Code, [`hooks/`](hooks/) ships a self-contained plugin (`SessionStart`, `Stop`, `SessionEnd` handlers) that mechanically nudges the agent to search Engram before starting work and reminds it to `remember` non-trivial changes before finishing, instead of relying on it recalling this section unprompted. See [`hooks/README.md`](hooks/README.md) for what each hook does and how to wire it into `settings.json`.
+A system prompt is easy to forget mid-session. [`plugins/engram-hooks/`](plugins/engram-hooks/) ships a self-contained plugin (`SessionStart`, `Stop`, `SessionEnd`, `PreToolUse` handlers, plus a Claude-Code-only `engram-project-onboarder` agent) that mechanically nudges the agent to search Engram before starting work and reminds it to `remember` non-trivial changes before finishing, instead of relying on it recalling this section unprompted. Works in both Claude Code and Codex — install with `/plugin marketplace add <this-repo>` then `/plugin install engram-hooks@engram-memory` (Claude Code), or `codex plugin marketplace add <this-repo>/plugins` then `codex plugin add engram-hooks@engram-memory` (Codex) — see [`plugins/engram-hooks/README.md`](plugins/engram-hooks/README.md) for what each hook does and the full install flow.
 
 ### Disable Claude Code's built-in auto memory
 
@@ -260,6 +319,7 @@ All options have `ENGRAM_*` environment variable fallbacks. CLI args take priori
 | — | `ENGRAM_ENABLE_DASHBOARD` | unset (off) | Truthy (`1`/`true`/`yes`) starts the dashboard as a second process alongside the MCP server |
 | `--host` (dashboard) | `ENGRAM_DASHBOARD_HOST` | `0.0.0.0` | Dashboard listen address |
 | `--port` (dashboard) | `ENGRAM_DASHBOARD_PORT` | `8193` | Dashboard listen port (first free port at or above this is used) |
+| — | `ENGRAM_QUERY_LOG` | unset (off) | File path; when set, `search`/`recall` append a JSONL trace of each call for retrieval-quality analysis |
 
 ## Storage Format
 
@@ -287,7 +347,7 @@ The search index is a rebuildable cache at `<data-path>/index/engram.db`. Delete
 # Build
 docker build -t engram .
 
-# Test (90 tests, separate Dockerfile — pytest/tests/ never ship in the production image)
+# Test (separate Dockerfile — pytest/tests/ never ship in the production image)
 docker build -f tests/Dockerfile -t engram-test .
 docker run --rm engram-test
 

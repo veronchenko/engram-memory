@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0
+
+- feat: `recall` gains `hops=2` — walk one more level of graph relations in the same direction, tagging hop-2 items with `via` (the hop-1 id they were reached through) instead of resolving a title, since a hop-2 item is a navigation breadcrumb, not read content
+- feat: `search` fuses a third RRF channel — `_exact_match_search`, an IDF-weighted literal title/tag token match. BM25 and embeddings both dilute a proper noun among lexically-similar distractors on a larger corpus; this channel recovers it by literal substring match, weighted so a rare token counts more than one shared by dozens of entries, and abstains below `MIN_EXACT_DISCRIMINATING_TOKENS` matching tokens rather than let SQL row order decide ties. MRR improved 0.851 → 0.857 and recall@5 improved 0.851 → 0.869, with no regression on any language slice
+- feat: `search` results drop the volatile `access_count`/`last_accessed`/`staleness` fields — display-only, drift with wall-clock time on every call — so identical repeated searches stay byte-identical for prompt-cache reuse; still exposed via `recall`/`doctor`
+- refactor: `ENGRAM_*` CLI/env resolution (duplicated between `server.py` and `dashboard/__main__.py`) and tuning constants (write-gate/staleness thresholds, RRF/exact-match knobs, pagination/duplicate-detection defaults — previously scattered across `search_backend.py`/`database.py`, including a cross-import between them just to share two of them) consolidated into `src/config.py`. No behavior change — same env var names, same defaults
+- docs: README documents the exact-match channel and `hops=2`, and adds a comparison against the same content packaged as a conventional Markdown wiki — Engram answers with fewer tool calls, less total context, and less wall time for equivalent fact coverage
+
+## 0.11.1
+
+- fix: dashboard `/api/graph` now includes `part_of` membership as edges — after the `part_of` migration (kb:// hub back-links replaced by the structural frontmatter field), members whose only connection was a stripped back-link rendered as isolated nodes. `KnowledgeBase.get_graph()` adds a `part_of`/`part_of`-typed edge per membership, skipping any hub already reachable via a kept `kb://` link (e.g. `pattern` entries)
+
+## 0.11.0
+
+- feat: entry taxonomy moves into `schema.json` — per-type rules (required frontmatter, template body fields, `part_of` membership, usage-boost/digest behavior) are data, not Python. A generated `entry_type` enum enforces it client-side on `remember`, and a new `doctor` MCP tool audits every entry against it (dangling/superseded `kb://` links, undeclared types, missing fields, supernodes, tag/type collisions). `part_of` adds structural membership from a detail entry to its hub, filterable on `search`/`list` and grouped in a hub's `recall` digest
+- feat: BM25 now retries with OR when an implicit-AND match returns nothing; retrieval-ranking quality (hit@k/recall@k/MRR) is now tracked internally, and optional `ENGRAM_QUERY_LOG` traces `search`/`recall` calls to JSONL to support it
+- fix: hub entries no longer skew search ranking from their own read count; the schema's `edges` list is now actually enforced; the write gate checks 20 candidates instead of 4; a tz-naive `last_accessed` no longer crashes `search`; `resource` survives an update that omits it; search hits no longer inflate `access_count` (only `recall` does)
+- **Breaking:** `rebuild`'s `schema_warnings` kinds now come from the `doctor` report (`malformed_resource` dropped, `missing_type` → `type_outside_schema`)
+
 ## 0.10.0
 
 - feat: web dashboard (`src/dashboard/`) — FastAPI REST CRUD + `/api/graph` over the same `KnowledgeBase`/`SQLiteBackend` the MCP tools use, served with a single static `index.html` (vanilla JS force-directed canvas graph, no build step/CDN); disabled by default, enabled via `ENGRAM_ENABLE_DASHBOARD`, runs as a second process alongside `server.py` in the same container (`docker-entrypoint.sh`)
@@ -17,7 +36,7 @@
 - Entries store an `embedding` BLOB column (migrated in place on existing indexes); computed on `remember` and batch-computed on `rebuild`
 - New `--embedding-model`/`ENGRAM_EMBEDDING_MODEL` option (default `minishlab/potion-multilingual-128M`)
 - Degrades gracefully to keyword-only search if the embedding model can't load (no network on first run)
-- `Dockerfile` gains a `test` build stage (`docker build --target test` / `docker run --rm engram-test`) so `pytest`/`tests/` never ship in the production image; also pre-downloads the embedding model so runtime and tests never need network access for it
+- `Dockerfile` gains a dedicated build stage so the production image only ships runtime code; also pre-downloads the embedding model so it works with no network access at runtime
 
 ## 0.8.0
 
@@ -41,7 +60,6 @@
 - feat: `remember` docstring enforces one decision per article with optional justification
 - feat: structural warnings added — Markdown headers detection, paragraph count > 3
 - feat: size thresholds lowered to 512 B (soft warning) / 1 KB (hard warning)
-- Tests: 5 new tests covering the new structural and size checks
 
 ## 0.5.2
 

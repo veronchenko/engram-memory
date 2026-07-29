@@ -6,3 +6,8 @@ okf/
 !.claude/skills/
 logs/
 venv/
+test_kb_data/
+.mcp.json
+external_research/
+.codegraph/
+eval/
