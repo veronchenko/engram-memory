@@ -28,7 +28,8 @@ class EntryIn(BaseModel):
     content: str
     tags: list[str]
     entry_type: str
-    resource: str = ""
+    # None (omitted) keeps an existing entry's resource on PATCH; "" clears it
+    resource: str | None = None
     supersede: bool = False
 
 
@@ -44,6 +45,28 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
     """
 
     app = FastAPI(title="Engram Dashboard")
+
+    def _check_type(entry_type: str) -> None:
+        """
+        Reject a write whose type is not declared in the schema.
+
+        The MCP tool gets this from its generated `entry_type` enum, which
+        the client enforces; this is the same gate for the REST path, so
+        neither writer can introduce a type `doctor` will later flag.
+
+        Args:
+            entry_type: Type name from the request body.
+
+        Raises:
+            HTTPException: 400 when the type is not in the schema.
+        """
+
+        if kb.schema.rule(entry_type) is None:
+            allowed = ", ".join(sorted(kb.schema.types))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown entry type '{entry_type}'. Allowed: {allowed}",
+            )
 
     @app.get("/api/graph")
     def get_graph(include_superseded: bool = False) -> dict:
@@ -86,6 +109,7 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
 
     @app.post("/api/entries")
     def create_entry(body: EntryIn) -> dict:
+        _check_type(body.entry_type)
         result = kb.remember(
             body.title,
             body.content,
@@ -99,6 +123,7 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
 
     @app.patch("/api/entries/{entry_id}")
     def update_entry(entry_id: str, body: EntryIn) -> dict:
+        _check_type(body.entry_type)
         result = kb.remember(
             body.title,
             body.content,

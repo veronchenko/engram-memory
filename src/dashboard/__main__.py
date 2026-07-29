@@ -8,66 +8,24 @@ No side effects on import.
 
 from __future__ import annotations
 
-import argparse
 import logging
-import os
 from pathlib import Path
 
 import uvicorn
 
+from config import DashboardSettings, parse_dashboard_args
 from database import KnowledgeBase
 from port_utils import find_free_port
 
 from .app import create_app
-from search_backend import DEFAULT_EMBEDDING_MODEL, SQLiteBackend
+from schema import load_schema
+from search_backend import SQLiteBackend
 
 
-def _env(name: str, default: str | None = None) -> str | None:
-    """Read an ENGRAM_* environment variable with a default."""
-    return os.environ.get(f"ENGRAM_{name}", default)
+def parse_args() -> DashboardSettings:
+    """Parse dashboard CLI arguments (see config.parse_dashboard_args)."""
 
-
-def parse_args() -> argparse.Namespace:
-    """
-    Parse command-line arguments.
-
-    Every argument has an ENGRAM_* environment variable fallback.
-    CLI arguments take priority over env vars.
-
-    Returns:
-        Parsed arguments namespace.
-    """
-
-    parser = argparse.ArgumentParser(description="Engram Dashboard")
-    parser.add_argument(
-        "--data-path",
-        default=_env("DATA_PATH", "/knowledge"),
-        help="Root path for knowledge data (env: ENGRAM_DATA_PATH, default: /knowledge)",
-    )
-    parser.add_argument(
-        "--host",
-        default=_env("DASHBOARD_HOST", "0.0.0.0"),
-        help="Listen address (env: ENGRAM_DASHBOARD_HOST, default: 0.0.0.0)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(_env("DASHBOARD_PORT", "8193")),
-        help=(
-            "Starting port; the first free port at or above this is used "
-            "(env: ENGRAM_DASHBOARD_PORT, default: 8193)"
-        ),
-    )
-    parser.add_argument(
-        "--embedding-model",
-        default=_env("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
-        help=(
-            "Model2Vec HuggingFace hub id for semantic search "
-            f"(env: ENGRAM_EMBEDDING_MODEL, default: {DEFAULT_EMBEDDING_MODEL})"
-        ),
-    )
-
-    return parser.parse_args()
+    return parse_dashboard_args()
 
 
 def main() -> None:
@@ -88,10 +46,11 @@ def main() -> None:
         logger.addHandler(handler)
 
     logger.info("Initializing knowledge base from %s", args.data_path)
+    schema = load_schema(args.data_path)
     index_path = Path(args.data_path) / "index" / "engram.db"
     backend = SQLiteBackend(index_path, embedding_model=args.embedding_model)
     backend.warm_up()
-    kb = KnowledgeBase(args.data_path, backend=backend)
+    kb = KnowledgeBase(args.data_path, backend=backend, schema=schema)
 
     app = create_app(kb)
 
