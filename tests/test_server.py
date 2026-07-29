@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from mcp.server.fastmcp import FastMCP
 
 from database import KnowledgeBase
+from schema import load_schema
 from server import parse_args, register_tools, setup_logging
 
 
@@ -52,12 +53,21 @@ class TestToolRegistration:
     """Verify that register_tools() creates the expected MCP tools."""
 
     def test_all_tools_registered(self, _setup: tuple) -> None:
-        """All seven tools must be registered on the MCP instance."""
+        """All eight tools must be registered on the MCP instance."""
 
         mcp, _kb, _logger = _setup
 
         tool_names = {t.name for t in mcp._tool_manager.list_tools()}
-        expected = {"search", "recall", "remember", "forget", "list", "tags", "rebuild"}
+        expected = {
+            "search",
+            "recall",
+            "remember",
+            "forget",
+            "list",
+            "tags",
+            "rebuild",
+            "doctor",
+        }
 
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
@@ -67,7 +77,16 @@ class TestToolRegistration:
         mcp, _kb, _logger = _setup
 
         tool_names = {t.name for t in mcp._tool_manager.list_tools()}
-        expected = {"search", "recall", "remember", "forget", "list", "tags", "rebuild"}
+        expected = {
+            "search",
+            "recall",
+            "remember",
+            "forget",
+            "list",
+            "tags",
+            "rebuild",
+            "doctor",
+        }
 
         # No unexpected tools
         assert tool_names == expected
@@ -331,6 +350,11 @@ class TestSetupLogging:
 # ---------------------------------------------------------------------------
 
 
+# Well-formed hub UUID for membership-required creates — target existence
+# is doctor's concern, only the format is enforced at write time
+_HUB_ID = "11111111-1111-4111-8111-111111111111"
+
+
 def _call_tool(mcp: FastMCP, name: str, arguments: dict) -> dict:
     """Call an MCP tool synchronously and return the raw dict result."""
     # Use _tool_manager.call_tool with convert_result=False to get the raw
@@ -421,7 +445,7 @@ class TestRememberAtomicityWarnings:
         assert any("paragraphs" in w for w in result["warnings"])
 
     def test_remember_no_warning_on_atomic_content(self, _setup: tuple) -> None:
-        """Short, atomic content produces no warnings."""
+        """Short, atomic content carrying its type's body fields is clean."""
 
         mcp, _kb, _logger = _setup
 
@@ -430,13 +454,52 @@ class TestRememberAtomicityWarnings:
             "remember",
             {
                 "title": "Atomic fact",
-                "content": "Logs go to stderr. Simplifies the Dockerfile.",
+                "content": "**Candidate:** log to stderr.\n**Status:** not_decided",
                 "tags": ["test"],
-                "entry_type": "snippet",
+                "entry_type": "idea",
             },
         )
 
         assert "warnings" not in result
+
+    def test_conformance_warning_reads_the_stored_entry(
+        self, _setup: tuple
+    ) -> None:
+        """An update inheriting `resource` is not reported as missing it.
+
+        The check runs against what was written, not the call's arguments,
+        so a content-only edit of a hub stays clean.
+        """
+
+        mcp, _kb, _logger = _setup
+        body = "**What it does:** things.\n**Stack:** Python."
+
+        created = _call_tool(
+            mcp,
+            "remember",
+            {
+                "title": "Project Hub",
+                "content": body,
+                "tags": ["test"],
+                "entry_type": "hub",
+                "resource": "/srv/project",
+            },
+        )
+        assert "warnings" not in created
+
+        updated = _call_tool(
+            mcp,
+            "remember",
+            {
+                "title": "Project Hub",
+                "content": body + " Revised.",
+                "tags": ["test"],
+                "entry_type": "hub",
+                "entry_id": created["id"],
+            },
+        )
+
+        assert "warnings" not in updated
 
 
 class TestToolRememberViaMcp:
@@ -479,6 +542,28 @@ class TestToolSearchViaMcp:
         assert "count" in result
         assert "results" in result
         assert isinstance(result["results"], list)
+
+    def test_tool_search_omits_volatile_usage_fields(self, _setup: tuple) -> None:
+        """access_count/last_accessed/staleness drift with wall-clock time
+        and don't affect ranking — the MCP response must not carry them,
+        so identical repeated searches stay byte-identical for prompt
+        caching. KnowledgeBase.search() itself still returns them (used by
+        the dashboard); only the MCP tool layer strips them."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember(
+            "Staleness Probe", "Unique staleness probe content.", ["test"], "snippet"
+        )
+        kb.get(created["id"], record_access=True)
+
+        result = _call_tool(mcp, "search", {"query": "staleness probe", "limit": 5})
+
+        assert result["results"]
+        for hit in result["results"]:
+            assert "access_count" not in hit
+            assert "last_accessed" not in hit
+            assert "staleness" not in hit
 
 
 class TestToolRecallViaMcp:
@@ -587,7 +672,9 @@ class TestToolSupersedeViaMcp:
 
         mcp, kb, _logger = _setup
 
-        created = kb.remember("Old Fact", "Original.", ["test"], "decision")
+        created = kb.remember(
+            "Old Fact", "Original.", ["test"], "decision", part_of=[_HUB_ID]
+        )
         old_id = created["id"]
 
         result = _call_tool(
@@ -616,7 +703,8 @@ class TestToolSupersedeViaMcp:
         mcp, kb, _logger = _setup
 
         created = kb.remember(
-            "Versioned", "Old gadget details.", ["test"], "decision"
+            "Versioned", "Old gadget details.", ["test"], "decision",
+            part_of=[_HUB_ID],
         )
         kb.remember(
             "Versioned",
@@ -641,10 +729,18 @@ class TestToolSupersedeViaMcp:
         mcp, kb, _logger = _setup
 
         kb.remember(
-            "Gadget Diagnostic", "Root cause of the gadget bug.", ["test"], "diagnostic"
+            "Gadget Diagnostic",
+            "Root cause of the gadget bug.",
+            ["test"],
+            "diagnostic",
+            part_of=[_HUB_ID],
         )
         kb.remember(
-            "Gadget Feature", "How the gadget feature works.", ["test"], "feature"
+            "Gadget Feature",
+            "How the gadget feature works.",
+            ["test"],
+            "feature",
+            part_of=[_HUB_ID],
         )
 
         result = _call_tool(
@@ -660,7 +756,9 @@ class TestToolSupersedeViaMcp:
 
         mcp, kb, _logger = _setup
 
-        created = kb.remember("Versioned Entry", "Old.", ["test"], "decision")
+        created = kb.remember(
+            "Versioned Entry", "Old.", ["test"], "decision", part_of=[_HUB_ID]
+        )
         kb.remember(
             "Versioned Entry",
             "New.",
@@ -692,3 +790,323 @@ class TestToolRebuildViaMcp:
 
         assert result["success"] is True
         assert result["entries_indexed"] == 2
+
+    def test_rebuild_reports_schema_warnings(self, _setup: tuple) -> None:
+        """rebuild surfaces doctor's per-kind counts."""
+
+        mcp, kb, _logger = _setup
+
+        kb.remember(
+            "Bare Decision", "No template fields.", ["test"], "decision",
+            part_of=[_HUB_ID],
+        )
+
+        result = _call_tool(mcp, "rebuild", {})
+
+        assert result["schema_warnings"]["missing_body_field"] == 1
+
+
+class TestEntryTypeEnum:
+    """entry_type is exposed as a schema-generated enum in the tool schema."""
+
+    def test_remember_entry_type_is_enum(self, _setup: tuple) -> None:
+        """The remember tool's JSON Schema constrains entry_type to the schema."""
+
+        mcp, _kb, _logger = _setup
+
+        tool = next(
+            t for t in mcp._tool_manager.list_tools() if t.name == "remember"
+        )
+        schema = tool.parameters
+        entry_type = schema["properties"]["entry_type"]
+
+        # Pydantic emits enums as a $ref into $defs
+        ref = entry_type.get("$ref", "")
+        definition = schema["$defs"][ref.rsplit("/", 1)[-1]]
+
+        assert set(definition["enum"]) == set(load_schema(None).types)
+
+    def test_invalid_entry_type_rejected(self, _setup: tuple) -> None:
+        """A type outside the schema cannot be passed through the tool."""
+
+        mcp, _kb, _logger = _setup
+
+        with pytest.raises(Exception):
+            _call_tool(
+                mcp,
+                "remember",
+                {
+                    "title": "Bogus",
+                    "content": "Body.",
+                    "tags": ["test"],
+                    "entry_type": "not_a_real_type",
+                },
+            )
+
+
+class TestToolDoctorViaMcp:
+    """Test the doctor tool through the MCP layer."""
+
+    def test_doctor_clean_kb(self, _setup: tuple) -> None:
+        """A conforming knowledge base reports no defects."""
+
+        mcp, kb, _logger = _setup
+
+        kb.remember(
+            "An Idea",
+            "**Candidate:** worth trying later.\n**Status:** not_decided",
+            ["test"],
+            "idea",
+        )
+
+        report = _call_tool(mcp, "doctor", {})
+
+        assert report["entries_scanned"] == 1
+        assert all(check["count"] == 0 for check in report["checks"].values())
+
+    def test_doctor_finds_dangling_link(self, _setup: tuple) -> None:
+        """A kb:// link to a missing entry is reported."""
+
+        mcp, kb, _logger = _setup
+
+        missing = str(uuid.uuid4())
+        created = kb.remember(
+            "Linking Idea",
+            f"See [gone](kb://{missing}#idea).",
+            ["test"],
+            "idea",
+        )
+
+        report = _call_tool(mcp, "doctor", {})
+
+        assert report["checks"]["dangling_link"]["count"] == 1
+        assert created["id"] in report["checks"]["dangling_link"]["ids"]
+
+
+class TestToolForgetWarnsOnBacklinks:
+    """forget reports entries left with dangling references."""
+
+    def test_forget_warns_about_incoming_links(self, _setup: tuple) -> None:
+        """Deleting a linked entry returns a warning naming the linkers."""
+
+        mcp, kb, _logger = _setup
+
+        target = kb.remember("Target Idea", "The referenced fact.", ["test"], "idea")
+        source = kb.remember(
+            "Source Idea",
+            f"Builds on [target](kb://{target['id']}#idea).",
+            ["test"],
+            "idea",
+        )
+
+        result = _call_tool(mcp, "forget", {"entry_id": target["id"]})
+
+        assert result["success"] is True
+        assert source["id"] in result["incoming"]
+        assert "dangling" in result["warning"]
+
+    def test_forget_unlinked_entry_has_no_warning(self, _setup: tuple) -> None:
+        """Deleting an entry nothing links to returns a plain success."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember("Lonely Idea", "Nobody links here.", ["test"], "idea")
+
+        result = _call_tool(mcp, "forget", {"entry_id": created["id"]})
+
+        assert "warning" not in result
+
+
+class TestToolListEntryTypeFilter:
+    """list's entry_type filter expands one bucket of a hub digest."""
+
+    def test_list_filters_by_entry_type(self, _setup: tuple) -> None:
+        """Only entries of the requested type are returned."""
+
+        mcp, kb, _logger = _setup
+
+        kb.remember(
+            "A Feature", "Some feature.", ["test"], "feature", force=True,
+            part_of=[_HUB_ID],
+        )
+        kb.remember("An Idea", "Some idea.", ["test"], "idea", force=True)
+
+        result = _call_tool(mcp, "list", {"entry_type": "feature"})
+
+        assert result["count"] == 1
+        assert result["entries"][0]["title"] == "A Feature"
+
+
+class TestRecallHubDigest:
+    """recall on a digesting type summarizes back-links instead of capping them."""
+
+    def test_hub_recall_returns_digest(self, _setup: tuple) -> None:
+        """A hub's incoming links come back grouped by the linking type."""
+
+        mcp, kb, _logger = _setup
+
+        hub = kb.remember(
+            "Project Hub",
+            "**What it does:** everything.\n**Stack:** Python.",
+            ["proj"],
+            "hub",
+            resource="/tmp/proj",
+        )
+        for index in range(2):
+            kb.remember(
+                f"Feature {index}",
+                f"Detail. [hub](kb://{hub['id']}#hub)",
+                ["proj"],
+                "feature",
+                force=True,
+                part_of=[hub["id"]],
+            )
+        kb.remember(
+            "Idea One",
+            f"Thought. [hub](kb://{hub['id']}#hub)",
+            ["proj"],
+            "idea",
+            force=True,
+        )
+
+        result = _call_tool(mcp, "recall", {"entry_id": hub["id"]})
+
+        digest = result["relations"]["in_digest"]
+        assert digest["feature"]["count"] == 2
+        assert digest["idea"]["count"] == 1
+        assert result["relations"]["in_total"] == 3
+        assert "in" not in result["relations"]
+
+    def test_non_hub_recall_keeps_flat_list(self, _setup: tuple) -> None:
+        """Types without digest_on_recall keep the plain incoming list."""
+
+        mcp, kb, _logger = _setup
+
+        target = kb.remember("Plain Idea", "Referenced.", ["test"], "idea")
+        kb.remember(
+            "Referring Idea",
+            f"See [it](kb://{target['id']}#idea).",
+            ["test"],
+            "idea",
+            force=True,
+        )
+
+        result = _call_tool(mcp, "recall", {"entry_id": target["id"]})
+
+        assert len(result["relations"]["in"]) == 1
+        assert "in_digest" not in result["relations"]
+
+
+class TestPartOfViaMcp:
+    """part_of plumbing through the MCP tool layer."""
+
+    def test_remember_rejects_required_type_without_part_of(
+        self, _setup: tuple
+    ) -> None:
+        """Creating a membership-required type without part_of errors."""
+
+        mcp, _kb, _logger = _setup
+
+        result = _call_tool(
+            mcp,
+            "remember",
+            {
+                "title": "Bare Feature",
+                "content": "Body.",
+                "tags": ["test"],
+                "entry_type": "feature",
+            },
+        )
+
+        assert "error" in result
+        assert "part_of" in result["error"]
+
+    def test_search_and_list_filter_by_part_of(self, _setup: tuple) -> None:
+        """search and list narrow to members of the given hub."""
+
+        mcp, kb, _logger = _setup
+
+        hub = kb.remember(
+            "Project Hub",
+            "**What it does:** things.\n**Stack:** Python.",
+            ["test"],
+            "hub",
+            resource="/srv/project",
+        )
+        kb.remember(
+            "Widget Feature", "How widgets work.", ["test"], "feature",
+            part_of=[hub["id"]],
+        )
+        kb.remember(
+            "Widget Snippet", "Widget code sample.", ["test"], "snippet",
+            force=True,
+        )
+
+        searched = _call_tool(
+            mcp, "search", {"query": "widget", "part_of": [hub["id"]]}
+        )
+        assert searched["count"] == 1
+        assert searched["results"][0]["title"] == "Widget Feature"
+
+        listed = _call_tool(mcp, "list", {"part_of": [hub["id"]]})
+        assert listed["count"] == 1
+        assert listed["entries"][0]["title"] == "Widget Feature"
+
+    def test_recall_returns_part_of(self, _setup: tuple) -> None:
+        """recall surfaces the entry's memberships."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember(
+            "Member Entry", "Body.", ["test"], "feature", part_of=[_HUB_ID]
+        )
+
+        result = _call_tool(mcp, "recall", {"entry_id": created["id"]})
+
+        assert result["part_of"] == [_HUB_ID]
+
+
+class TestQueryLog:
+    """ENGRAM_QUERY_LOG JSONL logging on search/recall."""
+
+    def test_search_and_recall_logged(
+        self, _setup: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With the env var set, search and recall append JSONL events."""
+
+        import json
+
+        mcp, kb, _logger = _setup
+        log_path = tmp_path / "query_log.jsonl"
+        monkeypatch.setenv("ENGRAM_QUERY_LOG", str(log_path))
+
+        created = kb.remember(
+            "Query log target", "A searchable body.", ["test"], "snippet"
+        )
+
+        _call_tool(mcp, "search", {"query": "searchable"})
+        _call_tool(mcp, "recall", {"entry_id": created["id"]})
+        _call_tool(mcp, "recall", {"entry_id": str(uuid.uuid4())})
+
+        lines = [
+            json.loads(line)
+            for line in log_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [rec["tool"] for rec in lines] == ["search", "recall", "recall"]
+        assert lines[0]["query"] == "searchable"
+        assert created["id"] in lines[0]["returned_ids"]
+        assert lines[1] == {**lines[1], "entry_id": created["id"], "found": True}
+        assert lines[2]["found"] is False
+        assert all("ts" in rec for rec in lines)
+
+    def test_disabled_without_env(
+        self, _setup: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without the env var, no log file is created."""
+
+        mcp, _kb, _logger = _setup
+        monkeypatch.delenv("ENGRAM_QUERY_LOG", raising=False)
+
+        _call_tool(mcp, "search", {"query": "anything"})
+
+        assert not list(tmp_path.glob("*.jsonl"))

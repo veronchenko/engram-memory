@@ -35,6 +35,16 @@ def kb(tmp_path: Path) -> KnowledgeBase:
 # ---------------------------------------------------------------------------
 
 
+# Well-formed hub UUID for membership-required creates — target existence
+# is doctor's concern, only the format is enforced at write time
+_HUB_ID = "11111111-1111-4111-8111-111111111111"
+
+# Types whose creation requires part_of (schema membership: required)
+_MEMBERSHIP_REQUIRED = {
+    "decision", "diagnostic", "feature", "procedure", "integration"
+}
+
+
 def _create_entry(
     kb: KnowledgeBase,
     title: str = "Test Entry",
@@ -43,13 +53,18 @@ def _create_entry(
     *,
     force: bool = False,
     entry_type: str = "snippet",
+    part_of: list[str] | None = None,
 ) -> dict:
     """Shorthand for creating an entry and asserting success."""
 
     if tags is None:
         tags = ["test"]
+    if part_of is None and entry_type in _MEMBERSHIP_REQUIRED:
+        part_of = [_HUB_ID]
 
-    result = kb.remember(title, content, tags, entry_type, force=force)
+    result = kb.remember(
+        title, content, tags, entry_type, force=force, part_of=part_of
+    )
     assert "error" not in result, f"Unexpected error: {result}"
     # Created or updated
     return result
@@ -484,7 +499,7 @@ class TestRebuild:
         assert results[0]["title"] == "Alpha Entry"
 
     def test_rebuild_conformance_warnings(self, kb: KnowledgeBase) -> None:
-        """Rebuild flags legacy entries missing type, and bad resources."""
+        """Rebuild runs the doctor pass: unknown types and missing body fields."""
 
         # Simulate a legacy entry predating the type requirement (bypasses
         # remember()'s validation by writing the file directly)
@@ -500,18 +515,19 @@ class TestRebuild:
             }
         )
         kb.remember(
-            "Bad Resource",
-            "Content.",
+            "Templateless Decision",
+            "Content without the template fields.",
             ["tag"],
             "decision",
             force=True,
-            resource="not-a-uri",
+            part_of=[_HUB_ID],
         )
 
-        result = kb.rebuild()
+        checks = kb.rebuild()["report"]["checks"]
 
-        assert len(result["warnings"]["missing_type"]) == 1
-        assert len(result["warnings"]["malformed_resource"]) == 1
+        assert checks["type_outside_schema"]["count"] == 1
+        assert legacy_id in checks["type_outside_schema"]["ids"]
+        assert checks["missing_body_field"]["count"] == 1
 
 
 # ===========================================================================
@@ -543,6 +559,130 @@ class TestList:
         entries = kb.list_entries(limit=3)
 
         assert len(entries) == 3
+
+    def test_list_entries_by_type(self, kb: KnowledgeBase) -> None:
+        """The entry_type filter narrows the listing to one type."""
+
+        _create_entry(kb, "A Feature", "F.", force=True, entry_type="feature")
+        _create_entry(kb, "An Idea", "I.", force=True, entry_type="idea")
+
+        entries = kb.list_entries(entry_type="feature")
+
+        assert [e["title"] for e in entries] == ["A Feature"]
+
+    def test_list_entries_by_unknown_type(self, kb: KnowledgeBase) -> None:
+        """Types left over from an older schema stay listable for cleanup."""
+
+        legacy_id = str(uuid.uuid4())
+        kb._write_entry(
+            {
+                "id": legacy_id,
+                "title": "Legacy Note",
+                "tags": [],
+                "type": "note",
+                "resource": "",
+                "content": "Body.",
+            }
+        )
+        kb._load_meta_cache()
+
+        entries = kb.list_entries(entry_type="note")
+
+        assert [e["id"] for e in entries] == [legacy_id]
+
+
+# ===========================================================================
+# Relation digest
+# ===========================================================================
+
+
+class TestRelationDigest:
+    """High-degree types summarize back-links instead of truncating them."""
+
+    def _hub_with_members(self, kb: KnowledgeBase) -> str:
+        """Create a hub linked from two features and one idea."""
+
+        hub = _create_entry(
+            kb, "Project Hub", "Overview.", force=True, entry_type="hub"
+        )
+        for index in range(2):
+            _create_entry(
+                kb,
+                f"Feature {index}",
+                f"Detail. [hub](kb://{hub['id']}#hub)",
+                force=True,
+                entry_type="feature",
+            )
+        _create_entry(
+            kb,
+            "Idea One",
+            f"Thought. [hub](kb://{hub['id']}#hub)",
+            force=True,
+            entry_type="idea",
+        )
+
+        return hub["id"]
+
+    def test_digest_groups_by_source_type(self, kb: KnowledgeBase) -> None:
+        """Counts are grouped by the linking entry's type, not the link's."""
+
+        hub_id = self._hub_with_members(kb)
+
+        digest = kb.digest_relations(hub_id)["in_digest"]
+
+        assert digest["feature"]["count"] == 2
+        assert digest["idea"]["count"] == 1
+        assert len(digest["feature"]["sample"]) == 2
+
+    def test_digest_counts_entries_not_edges(self, kb: KnowledgeBase) -> None:
+        """One entry linking twice with different edges is one member."""
+
+        hub = _create_entry(
+            kb, "Project Hub", "Overview.", force=True, entry_type="hub"
+        )
+        _create_entry(
+            kb,
+            "Feature One",
+            (
+                f"Detail. [hub](kb://{hub['id']}#hub:supports) "
+                f"and again [hub](kb://{hub['id']}#hub:related_to)"
+            ),
+            force=True,
+            entry_type="feature",
+        )
+
+        digest = kb.digest_relations(hub["id"])["in_digest"]
+
+        assert digest["feature"]["count"] == 1
+        assert len(digest["feature"]["sample"]) == 1
+
+    def test_digest_is_complete_where_a_capped_list_is_not(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """The digest counts every back-link even under a tight cap."""
+
+        hub_id = self._hub_with_members(kb)
+
+        capped = kb.get(hub_id, with_relations=True, relations_limit=1)
+        digested = kb.get(
+            hub_id, with_relations=True, relations_limit=1, digest=True
+        )
+
+        assert len(capped["relations"]["in"]) == 1
+        total = sum(
+            bucket["count"] for bucket in digested["relations"]["in_digest"].values()
+        )
+        assert total == 3
+
+    def test_digest_is_opt_in(self, kb: KnowledgeBase) -> None:
+        """Callers that read every relation anyway keep the flat list."""
+
+        hub_id = self._hub_with_members(kb)
+
+        entry = kb.get(hub_id, with_relations=True)
+
+        assert "in" in entry["relations"]
+        assert "in_digest" not in entry["relations"]
 
 
 # ===========================================================================
@@ -658,6 +798,7 @@ class TestExtendedSchema:
             "Body.",
             ["tag"],
             entry_type="decision",
+            part_of=[_HUB_ID],
         )
         entry_id = created["id"]
 
@@ -674,6 +815,58 @@ class TestExtendedSchema:
         assert entry is not None
         assert entry["type"] == "diagnostic"
         assert entry["resource"] == "/local/path"
+
+    def test_update_without_resource_keeps_it(self, kb: KnowledgeBase) -> None:
+        """A content-only edit must not drop a field the type requires."""
+
+        created = kb.remember(
+            "Hub", "Body.", ["tag"], "hub", resource="/srv/project"
+        )
+
+        kb.remember("Hub", "New body.", ["tag"], "hub", entry_id=created["id"])
+
+        entry = kb.get(created["id"])
+        assert entry is not None
+        assert entry["resource"] == "/srv/project"
+
+    def test_update_clears_resource_when_explicitly_empty(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """Clearing stays expressible — it just has to be deliberate."""
+
+        created = kb.remember(
+            "Hub", "Body.", ["tag"], "hub", resource="/srv/project"
+        )
+
+        kb.remember(
+            "Hub", "Body.", ["tag"], "hub", entry_id=created["id"], resource=""
+        )
+
+        entry = kb.get(created["id"])
+        assert entry is not None
+        assert entry["resource"] == ""
+
+    def test_supersede_without_resource_inherits_it(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """A new version of the same fact describes the same asset."""
+
+        created = kb.remember(
+            "Hub", "Body.", ["tag"], "hub", resource="/srv/project"
+        )
+
+        result = kb.remember(
+            "Hub",
+            "Revised body.",
+            ["tag"],
+            "hub",
+            entry_id=created["id"],
+            supersede=True,
+        )
+
+        entry = kb.get(result["id"])
+        assert entry is not None
+        assert entry["resource"] == "/srv/project"
 
     def test_list_entries_includes_new_fields(self, kb: KnowledgeBase) -> None:
         """list_entries surfaces type."""
@@ -715,7 +908,9 @@ class TestBiTemporal:
     def test_create_sets_valid_at(self, kb: KnowledgeBase) -> None:
         """A freshly created entry gets a non-empty valid_at."""
 
-        result = kb.remember("Fresh Fact", "Content.", ["tag"], "decision")
+        result = kb.remember(
+            "Fresh Fact", "Content.", ["tag"], "decision", part_of=[_HUB_ID]
+        )
 
         entry = kb.get(result["id"])
         assert entry is not None
@@ -756,7 +951,10 @@ class TestBiTemporal:
     def test_supersede_by_duplicate_match(self, kb: KnowledgeBase) -> None:
         """supersede=True via title-based duplicate match also versions."""
 
-        created = kb.remember("Repeated Title", "First version.", ["tag"], "decision")
+        created = kb.remember(
+            "Repeated Title", "First version.", ["tag"], "decision",
+            part_of=[_HUB_ID],
+        )
         old_id = created["id"]
 
         result = kb.remember(
@@ -774,7 +972,8 @@ class TestBiTemporal:
         """supersede=True with nothing to replace just creates normally."""
 
         result = kb.remember(
-            "Brand New", "Content.", ["tag"], "decision", supersede=True
+            "Brand New", "Content.", ["tag"], "decision", supersede=True,
+            part_of=[_HUB_ID],
         )
 
         assert result["action"] == "created"
@@ -783,7 +982,8 @@ class TestBiTemporal:
         """search() excludes superseded entries unless include_superseded=True."""
 
         created = kb.remember(
-            "Versioned Fact", "Old fact about widgets.", ["tag"], "decision"
+            "Versioned Fact", "Old fact about widgets.", ["tag"], "decision",
+            part_of=[_HUB_ID],
         )
         kb.remember(
             "Versioned Fact",
@@ -805,7 +1005,9 @@ class TestBiTemporal:
     def test_list_hides_superseded_by_default(self, kb: KnowledgeBase) -> None:
         """list_entries() excludes superseded entries unless include_superseded=True."""
 
-        created = kb.remember("Versioned Entry", "Old.", ["tag"], "decision")
+        created = kb.remember(
+            "Versioned Entry", "Old.", ["tag"], "decision", part_of=[_HUB_ID]
+        )
         kb.remember(
             "Versioned Entry",
             "New.",
@@ -826,7 +1028,10 @@ class TestBiTemporal:
         """get() on a superseded id returns that version's own content, not
         the new one's — no silent forwarding."""
 
-        created = kb.remember("Chained Fact", "Original text.", ["tag"], "decision")
+        created = kb.remember(
+            "Chained Fact", "Original text.", ["tag"], "decision",
+            part_of=[_HUB_ID],
+        )
         old_id = created["id"]
         result = kb.remember(
             "Chained Fact",
@@ -861,3 +1066,305 @@ class TestBiTemporal:
         assert entry["valid_at"] == ""
         assert entry["superseded_by"] == ""
         assert entry["supersedes"] == ""
+
+
+# ===========================================================================
+# Write-gate — semantic near-duplicate rejection
+# ===========================================================================
+
+
+class TestWriteGate:
+    """remember() rejects semantic near-duplicates of live entries."""
+
+    def _fake_gate(self, kb: KnowledgeBase, match_id: str) -> None:
+        """Make the backend report match_id as a 0.95-cosine near-duplicate."""
+
+        kb._backend.embed = lambda text: b"fake-embedding"
+        kb._backend.find_similar_by_embedding = (
+            lambda embedding, exclude_id, limit=4, min_similarity=0.45: [
+                {"id": match_id, "score": 0.95}
+            ]
+        )
+
+    def test_near_duplicate_rejected(self, kb: KnowledgeBase) -> None:
+        """A new entry too close to an existing one is rejected with its id."""
+
+        existing = _create_entry(kb, "Docker bridge networking", "Uses NAT.")
+        self._fake_gate(kb, existing["id"])
+
+        result = kb.remember(
+            "Container network address translation",
+            "Docker bridges NAT traffic.",
+            ["docker"],
+            "snippet",
+        )
+
+        assert "error" in result
+        assert result["duplicate_of"] == existing["id"]
+        assert result["similarity"] == 0.95
+
+    def test_force_bypasses_gate(self, kb: KnowledgeBase) -> None:
+        """force=True writes even a flagged near-duplicate."""
+
+        existing = _create_entry(kb, "Docker bridge networking", "Uses NAT.")
+        self._fake_gate(kb, existing["id"])
+
+        result = kb.remember(
+            "Container network address translation",
+            "Docker bridges NAT traffic.",
+            ["docker"],
+            "snippet",
+            force=True,
+        )
+
+        assert result["action"] == "created"
+
+    def test_superseded_match_does_not_block(self, kb: KnowledgeBase) -> None:
+        """A near-duplicate of a superseded (historical) entry is allowed."""
+
+        old = _create_entry(kb, "Old fact", "The old state of things.")
+        replacement = kb.remember(
+            "New fact",
+            "The new state of things.",
+            ["test"],
+            "snippet",
+            entry_id=old["id"],
+            supersede=True,
+        )
+        assert replacement["action"] == "superseded"
+
+        self._fake_gate(kb, old["id"])
+
+        result = kb.remember(
+            "Restating the old fact",
+            "History repeats itself.",
+            ["test"],
+            "snippet",
+        )
+
+        assert result["action"] == "created"
+
+    def _fake_ranking(self, kb: KnowledgeBase, ranked_ids: list[str]) -> None:
+        """Rank ranked_ids as near-duplicates, truncating to the asked limit.
+
+        Mirrors the real backend: it knows nothing about versioning, so it
+        returns the closest matches — superseded or not — and honours the
+        caller's limit.
+        """
+
+        kb._backend.embed = lambda text: b"fake-embedding"
+        kb._backend.find_similar_by_embedding = (
+            lambda embedding, exclude_id, limit=4, min_similarity=0.45: [
+                {"id": entry_id, "score": 0.95} for entry_id in ranked_ids
+            ][:limit]
+        )
+
+    def test_live_duplicate_found_behind_superseded_versions(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """A stack of old versions must not hide the live near-duplicate.
+
+        Superseded entries are filtered in this layer, not in the backend,
+        so the candidate buffer has to be deeper than a handful.
+        """
+
+        entry = _create_entry(kb, "Fact v1", "Version one.")
+        versions = [entry["id"]]
+        for version in range(2, 8):
+            entry = kb.remember(
+                f"Fact v{version}",
+                f"Version {version}.",
+                ["test"],
+                "snippet",
+                entry_id=entry["id"],
+                supersede=True,
+            )
+            assert entry["action"] == "superseded"
+            versions.append(entry["id"])
+
+        # Last one written is the only live version, and ranks last
+        live_id = versions.pop()
+        self._fake_ranking(kb, [*versions, live_id])
+
+        result = kb.remember(
+            "Restating the current fact",
+            "Version seven, again.",
+            ["test"],
+            "snippet",
+        )
+
+        assert result["duplicate_of"] == live_id
+
+    def test_gate_degrades_open_without_model(self, kb: KnowledgeBase) -> None:
+        """No embedding model => the gate never blocks writes."""
+
+        kb._backend.embed = lambda text: None
+
+        result = kb.remember(
+            "Unblocked entry", "Written despite no model.", ["test"], "snippet"
+        )
+
+        assert result["action"] == "created"
+
+
+
+# ===========================================================================
+# Structural membership — part_of
+# ===========================================================================
+
+
+class TestPartOf:
+    """part_of frontmatter: storage, enforcement, inheritance, filters."""
+
+    def test_create_writes_part_of_frontmatter(self, kb: KnowledgeBase) -> None:
+        """part_of round-trips through the Markdown file."""
+
+        hub = _create_entry(kb, "Project Hub", "Overview.", entry_type="hub")
+        created = kb.remember(
+            "Member Feature", "Body.", ["tag"], "feature", part_of=[hub["id"]]
+        )
+
+        filepath = kb.entry_path(created["id"])
+        assert filepath is not None
+        assert "part_of:" in filepath.read_text(encoding="utf-8")
+
+        entry = kb.get(created["id"])
+        assert entry is not None
+        assert entry["part_of"] == [hub["id"]]
+
+    def test_create_required_type_without_part_of_rejected(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """Creating a membership-required type without part_of fails."""
+
+        result = kb.remember("Bare Feature", "Body.", ["tag"], "feature")
+
+        assert "error" in result
+        assert "part_of" in result["error"]
+
+    def test_force_does_not_bypass_membership(self, kb: KnowledgeBase) -> None:
+        """force skips duplicate detection only — not the membership rule."""
+
+        result = kb.remember(
+            "Forced Feature", "Body.", ["tag"], "feature", force=True
+        )
+
+        assert "error" in result
+        assert "part_of" in result["error"]
+
+    def test_malformed_part_of_rejected(self, kb: KnowledgeBase) -> None:
+        """A part_of target that is not a UUID is rejected outright."""
+
+        result = kb.remember(
+            "Feature", "Body.", ["tag"], "feature", part_of=["not-a-uuid"]
+        )
+
+        assert "error" in result
+        assert "not-a-uuid" in result["error"]
+
+    def test_update_without_part_of_keeps_it(self, kb: KnowledgeBase) -> None:
+        """A content-only edit must not drop the memberships."""
+
+        created = kb.remember(
+            "Kept Feature", "Body.", ["tag"], "feature", part_of=[_HUB_ID]
+        )
+
+        kb.remember(
+            "Kept Feature", "New body.", ["tag"], "feature",
+            entry_id=created["id"],
+        )
+
+        entry = kb.get(created["id"])
+        assert entry is not None
+        assert entry["part_of"] == [_HUB_ID]
+
+    def test_update_clears_part_of_with_empty_list(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """Clearing stays expressible — it just has to be deliberate."""
+
+        created = kb.remember(
+            "Cleared Feature", "Body.", ["tag"], "feature", part_of=[_HUB_ID]
+        )
+
+        kb.remember(
+            "Cleared Feature", "Body.", ["tag"], "feature",
+            entry_id=created["id"], part_of=[],
+        )
+
+        entry = kb.get(created["id"])
+        assert entry is not None
+        assert entry["part_of"] == []
+
+    def test_supersede_inherits_part_of(self, kb: KnowledgeBase) -> None:
+        """A new version of the same fact belongs to the same project."""
+
+        created = kb.remember(
+            "Versioned Member", "Old.", ["tag"], "feature", part_of=[_HUB_ID]
+        )
+
+        result = kb.remember(
+            "Versioned Member", "New.", ["tag"], "feature",
+            entry_id=created["id"], supersede=True,
+        )
+
+        entry = kb.get(result["id"])
+        assert entry is not None
+        assert entry["part_of"] == [_HUB_ID]
+
+    def test_warning_when_target_is_not_a_hub(self, kb: KnowledgeBase) -> None:
+        """part_of pointing at a known non-hub entry warns, not blocks."""
+
+        snippet = _create_entry(kb, "Just a Snippet", "Body.")
+        result = kb.remember(
+            "Misattached Feature", "Body.", ["tag"], "feature",
+            part_of=[snippet["id"]],
+        )
+
+        assert result["action"] == "created"
+        assert any("hub" in w for w in result["warnings"])
+
+    def test_list_entries_part_of_filter(self, kb: KnowledgeBase) -> None:
+        """list_entries narrows to members of the given hub."""
+
+        hub = _create_entry(kb, "Project Hub", "Overview.", entry_type="hub")
+        member = kb.remember(
+            "In Project", "Body.", ["tag"], "feature", part_of=[hub["id"]]
+        )
+        _create_entry(kb, "Outside", "Body.", force=True)
+
+        entries = kb.list_entries(part_of=[hub["id"]])
+
+        assert [e["id"] for e in entries] == [member["id"]]
+        assert entries[0]["part_of"] == [hub["id"]]
+
+    def test_digest_counts_part_of_members_without_links(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """The hub digest sees members attached via part_of alone."""
+
+        hub = _create_entry(kb, "Project Hub", "Overview.", entry_type="hub")
+        kb.remember(
+            "Linkless Member", "No kb links here.", ["tag"], "feature",
+            part_of=[hub["id"]],
+        )
+
+        digest = kb.digest_relations(hub["id"])["in_digest"]
+
+        assert digest["feature"]["count"] == 1
+
+    def test_digest_dedupes_link_and_membership(self, kb: KnowledgeBase) -> None:
+        """An entry both linking and belonging is one member."""
+
+        hub = _create_entry(kb, "Project Hub", "Overview.", entry_type="hub")
+        kb.remember(
+            "Double Member",
+            f"See [hub](kb://{hub['id']}#hub).",
+            ["tag"],
+            "feature",
+            part_of=[hub["id"]],
+        )
+
+        digest = kb.digest_relations(hub["id"])["in_digest"]
+
+        assert digest["feature"]["count"] == 1
