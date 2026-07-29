@@ -1,0 +1,14 @@
+{
+  "name": "engram-memory",
+  "description": "Marketplace for the engram-hooks plugin, distributed alongside the Engram MCP persistent-memory server.",
+  "owner": {
+    "name": "Dmitrii E"
+  },
+  "plugins": [
+    {
+      "name": "engram-hooks",
+      "source": "./plugins/engram-hooks",
+      "description": "Nudges Claude Code to actually use the Engram MCP memory server — search before starting work, and remember non-trivial changes before finishing."
+    }
+  ]
+}

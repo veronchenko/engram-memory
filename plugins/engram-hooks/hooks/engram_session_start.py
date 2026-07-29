@@ -18,9 +18,8 @@ except Exception:
         pass
 
 PROMPT = """
-New Claude Code session started. Searching Engram (the persistent-memory MCP server) is mandatory at the start of every single user request, no exceptions — code changes, planning, questions, discussion, review, anything. 
-Search (mcp__engram__search / mcp__engram__recall) before your first substantive action, regardless of how small, familiar, or 'obviously just a chat' the request looks — relevance is not yours to pre-judge. 
-If this project directory has no Engram hub entry yet (search/list/tags turn up nothing for it), that's a gap to fix via the engram-project-onboarder subagent.
+New Claude Code session started. Search Engram (mcp__engram__search / mcp__engram__recall) before the first substantive action on every user request, and again when the topic shifts.
+If this project directory has no Engram hub entry yet (search/list/tags turn up nothing for it), fix that via the engram-project-onboarder subagent.
 """
 
 

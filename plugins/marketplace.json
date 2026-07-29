@@ -1,0 +1,21 @@
+{
+  "name": "engram-memory",
+  "interface": {
+    "displayName": "Engram Memory"
+  },
+  "plugins": [
+    {
+      "name": "engram-hooks",
+      "source": {
+        "source": "local",
+        "path": "./engram-hooks"
+      },
+      "description": "Nudges Codex to actually use the Engram MCP memory server — search before starting work, and remember non-trivial changes before finishing.",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -10,9 +10,9 @@ You create the Engram "hub" entry (and its linked detail entries) for a project 
 ## Ground rules
 
 - Engram stores ZERO discoverable information, **except** for the project hub, which is the one deliberate exception: a future session in a *different* project cannot read this project's CLAUDE.md/README, so the hub restates the essentials even though they're "discoverable" from inside this repo.
-- Don't cram everything into one entry. Write a hub plus separate linked detail entries, connected via `kb://uuid#type` references in both directions (hub → detail, detail → hub).
-- Every `mcp__engram__remember` call requires an explicit `entry_type` argument (`hub`, `pattern`, `integration`, `feature`, `decision`, `procedure`, ...) — it's a dedicated frontmatter field now, not part of `tags`. The call fails with `{"error": "entry_type is required"}` if omitted.
-- Tag every entry you create with the project name so `search`/`list`/`tags` can filter by it later — `tags` no longer needs (or should contain) the entry type, since that lives in `entry_type`.
+- Don't cram everything into one entry. Write a hub plus separate detail entries. Membership is the `part_of` argument on `remember` (a list of hub UUIDs) — the hub must therefore be created FIRST, so the details have an id to point at. `kb://uuid#type` references in content are for semantic relationships only (supports/contradicts/related_to), not membership.
+- Every `mcp__engram__remember` call requires an explicit `entry_type` argument (`hub`, `pattern`, `integration`, `feature`, `decision`, `procedure`, ...) — it's a dedicated frontmatter field now, not part of `tags`. The call fails with `{"error": "entry_type is required"}` if omitted. Creating a `decision`/`diagnostic`/`feature`/`procedure`/`integration` without `part_of` is likewise rejected.
+- `tags` are topical only (`mcp`, `auth`, `rag`, ...) — do NOT tag entries with the project name; project scoping is `part_of`'s job (`search`/`list` filter by `part_of=[<hub uuid>]`).
 - Pass `resource` (optional) as a filesystem path — the project folder for the `hub` entry, the specific file/module for detail entries (`integration`, `feature`, `pattern`, ...).
 - `valid_at`/`superseded_by`/`supersedes` are optional frontmatter fields the server manages itself (`valid_at` set automatically on creation/versioning, `superseded_by`/`supersedes` set by a `supersede` update) — never set these by hand.
 
@@ -38,7 +38,7 @@ Stay proportional: this is a scoping pass, not a full codebase review. A few tar
 
 ### 3. Write the hub entry
 
-Call `mcp__engram__remember` with `entry_type: "hub"`, `tags: [<project_name>]`, `resource: "<absolute path to the project folder>"`, and this body shape:
+Call `mcp__engram__remember` with `entry_type: "hub"`, topical `tags` (or none), `resource: "<absolute path to the project folder>"`, no `part_of` (hubs are membership targets, never members), and this body shape:
 
 ```markdown
 <1-2 sentences: what it is, domain, port/env, part of which larger system.>
@@ -61,7 +61,7 @@ Use `[<other_project_name>](kb://uuid#hub)` for any other project that already h
 
 ### 4. Write linked detail entries (only for what's substantial)
 
-For each notable thing you found, pick the matching `entry_type` below — don't force a type the project doesn't warrant. Every detail entry: `entry_type: "<type>"`, `tags: [<project_name>]`, end with `[Back to hub](kb://<hub-uuid>#hub)`, and get referenced back from the hub via `kb://uuid#type`.
+For each notable thing you found, pick the matching `entry_type` below — don't force a type the project doesn't warrant. Every detail entry: `entry_type: "<type>"`, `part_of: ["<hub-uuid>"]` (this is what attaches it to the project — no `[Back to hub]` link, no project tag), topical `tags` only. Reference genuinely load-bearing details from the hub body via `kb://uuid#type` where it helps navigation; the reverse direction is already covered by `part_of` (the hub's recall digest lists members automatically). Exception: `pattern` entries express their origin project as a semantic `kb://<hub-uuid>#hub` link in the **Proof-of-concept** body line, with `part_of` optional.
 
 If a detail entry you're about to write already exists and what it recorded has genuinely changed (e.g. a `decision` was reversed, an `integration`/`feature` was replaced by a different implementation) — not just a wording tweak — call `mcp__engram__remember` with `supersede: true` on that entry instead of overwriting it, so the earlier state stays recoverable.
 
