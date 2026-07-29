@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "limits": {
+    "max_degree": 15
+  },
+  "edges": ["supports", "contradicts", "related_to"],
+  "types": {
+    "hub": {
+      "required": ["resource"],
+      "body": ["What it does", "Stack"],
+      "membership": "none",
+      "membership_target": true,
+      "usage_boost": false,
+      "digest_on_recall": true
+    },
+    "decision": {
+      "body": ["Context", "Chosen"],
+      "membership": "required"
+    },
+    "diagnostic": {
+      "body": ["Symptom", "Root cause", "Fix"],
+      "membership": "required"
+    },
+    "feature": {
+      "body": ["Decision", "Implementation"],
+      "membership": "required"
+    },
+    "procedure": {
+      "body": ["When to use", "Steps"],
+      "membership": "required"
+    },
+    "integration": {
+      "required": ["resource"],
+      "body": ["What it integrates with", "Key details"],
+      "membership": "required"
+    },
+    "pattern": {
+      "body": ["Proof-of-concept"],
+      "membership": "optional"
+    },
+    "snippet": {
+      "body": ["Problem it solves"],
+      "membership": "optional"
+    },
+    "preference": {
+      "body": ["Preference", "Scope"],
+      "membership": "none"
+    },
+    "idea": {
+      "body": ["Candidate", "Status"],
+      "membership": "optional"
+    }
+  }
+}
