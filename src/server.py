@@ -136,31 +136,36 @@ def register_tools(
         tags: list[str] | None = None,
         limit: int = 10,
         include_superseded: bool = False,
-        entry_type: str | None = None,
+        entry_type: EntryType | None = None,
         part_of: list[str] | None = None,
     ) -> dict:
         """
         Search entries by keyword + semantic similarity.
 
         Args:
-            tags: All tags must match.
+            tags: All tags must match. Only tags that already exist in
+                the KB narrow results — an unused tag returns nothing.
             limit: Capped at 100.
             include_superseded: Superseded entries are history, not
                 current facts — hidden by default. Pass True for "was X
                 ever used"/"what did it replace"-style historical questions.
-            entry_type: Exact match, e.g. "diagnostic".
-            part_of: Hub UUIDs — only entries that are members of all
-                of them (AND logic, like tags).
+            entry_type: Narrow to one type once the plain-query results
+                look mixed or too broad. Leave unset for a first pass.
+            part_of: UUIDs of parent entries — only entries that are
+                members of all of them (AND logic, like tags). Find one
+                with a prior search/list if not already known; which
+                type(s) can act as a parent is schema-defined.
         """
 
         limit = max(1, min(limit, 100))
+        type_name = entry_type.value if entry_type is not None else None
 
         logger.info(
             "search: query='%s', tags=%s, limit=%d, entry_type=%s, part_of=%s",
             query,
             tags,
             limit,
-            entry_type,
+            type_name,
             part_of,
         )
 
@@ -169,7 +174,7 @@ def register_tools(
             tags=tags,
             limit=limit,
             include_superseded=include_superseded,
-            entry_type=entry_type,
+            entry_type=type_name,
             part_of=part_of,
         )
 
@@ -188,7 +193,7 @@ def register_tools(
             "search",
             query=query,
             tags=tags,
-            entry_type=entry_type,
+            entry_type=type_name,
             part_of=part_of,
             returned_ids=[r["id"] for r in results],
         )
@@ -286,10 +291,10 @@ def register_tools(
                 keep the existing one; pass "" to clear.
             supersede: Version the matched entry instead of overwriting
                 in place. No-op if nothing matched.
-            part_of: Hub UUIDs this entry belongs to. Required when
-                creating an entry of a membership-required type. Omit
-                on update to keep the existing memberships; pass [] to
-                clear.
+            part_of: UUIDs of the parent entries this one belongs to.
+                Required when creating an entry of a membership-required
+                type. Omit on update to keep the existing memberships;
+                pass [] to clear.
 
         Returns:
             The id and what was done, plus any suggested_links worth
@@ -329,13 +334,6 @@ def register_tools(
             content_size = len(content.encode("utf-8"))
             result["size"] = content_size
 
-            # Schema conformance — non-blocking, unlike the type itself,
-            # which the enum already rejected client-side. Checked against
-            # the stored entry rather than these arguments: an update may
-            # inherit fields it didn't pass (resource), and only the
-            # stored form knows what the entry actually looks like now.
-            # kb.remember may have added its own warnings (e.g. a part_of
-            # target that is not a hub) — keep them, don't overwrite.
             stored = kb.get(result["id"])
             warnings = list(result.get("warnings", []))
             if stored:
@@ -421,9 +419,10 @@ def register_tools(
                 current facts — hidden by default.
             entry_type: Exact match. Any value is accepted, including
                 retired types — that is how leftovers are found.
-            part_of: Hub UUIDs — only entries that are members of all
-                of them. Combine with entry_type to expand one bucket
-                of a hub's recall digest in full.
+            part_of: UUIDs of parent entries — only entries that are
+                members of all of them. Combine with entry_type to
+                expand one bucket of a parent entry's recall digest in
+                full.
         """
 
         limit = max(1, min(limit, 500))
