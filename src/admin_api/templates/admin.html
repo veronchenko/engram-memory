@@ -13,7 +13,7 @@
     <form method="post" action="/logout"><button type="submit">Log out</button></form>
   </header>
 
-  <form hx-post="/admin/teams" hx-target="#teams" hx-swap="outerHTML">
+  <form hx-post="/admin/teams" hx-target="#teams" hx-swap="outerHTML swap:150ms">
     <label for="f-team-name" class="sr-only">Team name</label>
     <input id="f-team-name" type="text" name="name" placeholder="team-name" required pattern="[a-z0-9][a-z0-9_-]{0,63}">
     <button type="submit" class="primary">Add team</button>

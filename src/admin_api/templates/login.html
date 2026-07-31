@@ -12,7 +12,14 @@
     .login-form h1 { margin: 0 0 var(--space-4); }
     .login-form input { width: 100%; margin-bottom: var(--space-4); }
     .login-form button { width: 100%; }
-    .error { color: var(--danger); margin: 0 0 var(--space-4); font-size: var(--text-base); }
+    .error {
+      color: var(--danger); margin: 0 0 var(--space-4); font-size: var(--text-base);
+      opacity: 1; transform: translateY(0);
+      transition: opacity var(--duration-base) var(--ease-out-expo), transform var(--duration-base) var(--ease-out-expo);
+    }
+    @starting-style {
+      .error { opacity: 0; transform: translateY(-4px); }
+    }
   </style>
 </head>
 <body>

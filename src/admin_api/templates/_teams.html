@@ -28,7 +28,7 @@
           <td>
             {% if not t.revoked_at %}
             <button type="button" class="danger" data-revoke-name="{{ t.name }}"
-              hx-post="/admin/teams/{{ t.name }}/revoke" hx-target="#teams" hx-swap="outerHTML" hx-trigger="confirmed">
+              hx-post="/admin/teams/{{ t.name }}/revoke" hx-target="#teams" hx-swap="outerHTML swap:150ms" hx-trigger="confirmed">
               Revoke
             </button>
             {% endif %}

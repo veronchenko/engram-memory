@@ -138,8 +138,16 @@ button.danger.confirming::after {
 .banner {
   background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
   padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); font-size: var(--text-base);
+  opacity: 1; transform: translateY(0);
+  transition: opacity var(--duration-base) var(--ease-out-expo), transform var(--duration-base) var(--ease-out-expo);
+}
+@starting-style {
+  .banner { opacity: 0; transform: translateY(-4px); }
 }
 .banner.error { border-left-color: var(--danger); color: var(--text); }
+
+#teams { opacity: 1; transition: opacity var(--duration-fast) var(--ease-out-expo); }
+#teams.htmx-swapping { opacity: 0; }
 .banner code {
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2); font-size: var(--text-sm);
