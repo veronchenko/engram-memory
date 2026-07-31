@@ -162,6 +162,33 @@ docker port engram 8192   # host port Docker assigned
 claude mcp add --transport http engram http://your-host:<port>/mcp
 ```
 
+### Multi-tenant
+
+One server, several teams, each isolated to its own data folder and API key. Set `ENGRAM_MULTI_TENANT=1` (requires `ENGRAM_PUBLIC_URL` and `ENGRAM_ADMIN_API_KEY`, and a network transport — never stdio); `src/app.py` then serves MCP, the admin UI, and the dashboard from one process. Provision a team with `engram add-team <name>` (run via `docker exec`, see [`src/cli.py`](src/cli.py)) to get back its API key, then point each team's agent at `/mcp` with that key as a bearer token:
+
+```bash
+claude mcp add --transport http engram https://your-host/mcp \
+  --header "Authorization: Bearer <TEAM_API_KEY>"
+```
+
+Or as a raw `mcpServers` config (Claude Desktop and other clients):
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "type": "http",
+      "url": "https://your-host/mcp",
+      "headers": {
+        "Authorization": "Bearer <TEAM_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+`TeamTokenVerifier` (`src/server.py`) hashes the token and looks it up in `admin.db` on every request — no caching, so a revoked key stops working immediately.
+
 ## Search
 
 Hybrid: SQLite FTS5 (Porter stemming, BM25) fused with cosine similarity over local [Model2Vec](https://github.com/MinishLab/model2vec) embeddings (`minishlab/potion-multilingual-128M`, no cloud dependency) via Reciprocal Rank Fusion — so a query that shares no literal words with an entry can still find it by meaning. Falls back to keyword-only if the embedding model can't load. The index is still a single SQLite file you can query with standard SQL tools.
