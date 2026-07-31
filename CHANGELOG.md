@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- fix: `search`'s `entry_type` filter is validated against the schema enum (was a plain `str`, so an unknown/misspelled type silently matched nothing instead of being rejected client-side, unlike `remember`)
+- docs: `search`/`remember`/`list` tool descriptions for `entry_type`/`part_of` no longer assume the packaged schema's type names (`hub`, `diagnostic`, `decision`) — a replaced `schema.json` need not have any of them
+
 ## 0.12.0
 
 - feat: `recall` gains `hops=2` — walk one more level of graph relations in the same direction, tagging hop-2 items with `via` (the hop-1 id they were reached through) instead of resolving a title, since a hop-2 item is a navigation breadcrumb, not read content
