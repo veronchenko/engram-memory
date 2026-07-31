@@ -13,13 +13,19 @@ Data: Markdown files in --data-path/entries/, search index in --data-path/index/
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import json
 import logging
 import re
+import threading
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+import uvicorn
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.fastmcp import FastMCP
 
 from config import ServerSettings, env, parse_server_args
@@ -28,6 +34,7 @@ from doctor import MAX_REPORTED_IDS, check_entry
 from port_utils import find_free_port
 from schema import Schema, build_entry_type_enum, load_schema
 from search_backend import SQLiteBackend
+from team_admin import TeamAdminStore
 
 # The `entry_type` enum in the `remember` signature. Declared here as a
 # placeholder so the annotation resolves for readers and static analysis;
@@ -106,7 +113,7 @@ def setup_logging() -> logging.Logger:
 
 def register_tools(
     mcp: FastMCP,
-    kb: KnowledgeBase,
+    kb: KnowledgeBase | Callable[[], KnowledgeBase],
     logger: logging.Logger,
     schema: Schema | None = None,
 ) -> None:
@@ -114,11 +121,15 @@ def register_tools(
     Register all MCP tools on the given server instance.
 
     Args:
+        kb: A fixed KnowledgeBase (single-tenant), or a zero-arg callable
+            resolving one per call (multi-tenant — see TeamRegistry.get,
+            which reads the authenticated team off the current request).
         schema: Entry validation contract. Defaults to the one the
             knowledge base was built with.
     """
 
-    schema = schema if schema is not None else kb.schema
+    kb_provider = kb if callable(kb) else (lambda: kb)
+    schema = schema if schema is not None else kb_provider().schema
 
     # FastMCP derives each tool's JSON Schema from its type hints at
     # decoration time, and this module uses PEP 563 string annotations —
@@ -157,6 +168,7 @@ def register_tools(
                 type(s) can act as a parent is schema-defined.
         """
 
+        kb = kb_provider()
         limit = max(1, min(limit, 100))
         type_name = entry_type.value if entry_type is not None else None
 
@@ -230,6 +242,7 @@ def register_tools(
             recall() that id directly to read it.
         """
 
+        kb = kb_provider()
         relations_limit = max(1, min(relations_limit, 100))
         hops = max(1, min(hops, 2))
 
@@ -303,6 +316,7 @@ def register_tools(
             update or supersede that entry, or pass force=True.
         """
 
+        kb = kb_provider()
         # Store the plain string, not the enum member
         type_name = entry_type.value
 
@@ -382,6 +396,7 @@ def register_tools(
             fix or drop those links; doctor re-finds them all.
         """
 
+        kb = kb_provider()
         logger.info("forget: id=%s", entry_id)
 
         # Read back-links before the row disappears from the index
@@ -425,6 +440,7 @@ def register_tools(
                 full.
         """
 
+        kb = kb_provider()
         limit = max(1, min(limit, 500))
 
         logger.info(
@@ -451,6 +467,7 @@ def register_tools(
         List all tags in the knowledge base, most used first.
         """
 
+        kb = kb_provider()
         logger.info("tags")
 
         tag_list = kb.list_tags()
@@ -472,6 +489,7 @@ def register_tools(
             for the ids.
         """
 
+        kb = kb_provider()
         logger.info("rebuild: starting full rebuild")
 
         result = kb.rebuild()
@@ -504,6 +522,7 @@ def register_tools(
             ones (the id list is capped; the count is the true total).
         """
 
+        kb = kb_provider()
         logger.info("doctor: running integrity checks")
 
         report = kb.doctor()
@@ -512,6 +531,82 @@ def register_tools(
             "doctor: scanned %d entries", report["entries_scanned"]
         )
         return report
+
+
+# ---------------------------------------------------------------------------
+# Multi-tenant routing
+# ---------------------------------------------------------------------------
+
+
+class TeamRegistry:
+    """
+    Lazily-built, in-process cache of per-team KnowledgeBase instances.
+
+    Multi-tenant mode only. Each team's data lives under
+    <data_path>/teams/<folder>/{entries,index}, built against the same
+    process-wide schema every team shares. Instances are created on
+    first use and kept for the process lifetime — a revoked key simply
+    stops resolving to a folder in admin.db (TeamTokenVerifier checks
+    the database on every request), so the cache never needs eviction.
+    """
+
+    def __init__(
+        self, teams_root: Path, schema: Schema, embedding_model: str
+    ) -> None:
+        self._teams_root = teams_root
+        self._schema = schema
+        self._embedding_model = embedding_model
+        self._cache: dict[str, KnowledgeBase] = {}
+        self._lock = threading.Lock()
+
+    def get(self, folder: str) -> KnowledgeBase:
+        """Return the cached KnowledgeBase for a team, building it if new."""
+
+        kb = self._cache.get(folder)
+        if kb is not None:
+            return kb
+
+        with self._lock:
+            kb = self._cache.get(folder)
+            if kb is None:
+                team_path = self._teams_root / folder
+                index_path = team_path / "index" / "engram.db"
+                backend = SQLiteBackend(
+                    index_path, embedding_model=self._embedding_model
+                )
+                backend.warm_up()
+                kb = KnowledgeBase(str(team_path), backend=backend, schema=self._schema)
+                self._cache[folder] = kb
+            return kb
+
+    def resolve_current(self) -> KnowledgeBase:
+        """
+        Resolve the KnowledgeBase for the team authenticated on this request.
+
+        Raises:
+            PermissionError: no verified access token on the current
+                request — shouldn't happen, since FastMCP rejects
+                unauthenticated requests before any tool body runs once
+                `auth`/`token_verifier` are configured.
+        """
+
+        access_token = get_access_token()
+        if access_token is None:
+            raise PermissionError("No authenticated team for this request")
+        return self.get(access_token.client_id)
+
+
+class TeamTokenVerifier(TokenVerifier):
+    """Resolves a bearer token to a team folder via TeamAdminStore."""
+
+    def __init__(self, store: TeamAdminStore) -> None:
+        self._store = store
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        folder = self._store.verify_key(token)
+        if folder is None:
+            return None
+        return AccessToken(token=token, client_id=folder, scopes=[])
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +621,10 @@ def main() -> None:
 
     args = parse_args()
     logger = setup_logging()
+
+    if args.multi_tenant:
+        _run_multi_tenant(args, logger)
+        return
 
     logger.info("Initializing knowledge base from %s", args.data_path)
     schema = load_schema(args.data_path)
@@ -554,6 +653,62 @@ def main() -> None:
 
     logger.info("Starting Engram (%s transport)", args.transport)
     mcp.run(transport=args.transport)
+
+
+def _run_multi_tenant(args: ServerSettings, logger: logging.Logger) -> None:
+    """
+    Start the MCP server in multi-tenant mode — one process serving
+    several teams, routed per request by bearer token (TeamRegistry +
+    TeamTokenVerifier). See engram_memory decision on multi-tenant VPS
+    deployment for the full design.
+    """
+
+    if args.transport != "streamable-http":
+        raise SystemExit(
+            "--multi-tenant requires --transport streamable-http — MCP, "
+            "the dashboard, and the admin UI are mounted as one ASGI app "
+            "in a single process, which stdio/sse don't fit"
+        )
+    if not args.public_url:
+        raise SystemExit(
+            "--multi-tenant requires --public-url/ENGRAM_PUBLIC_URL — the "
+            "externally reachable base URL used as the OAuth resource-"
+            "server identifier for token validation"
+        )
+    if not args.admin_api_key:
+        raise SystemExit(
+            "--multi-tenant requires --admin-api-key/ENGRAM_ADMIN_API_KEY — "
+            "the merged admin UI and JSON API refuse to start unauthenticated"
+        )
+
+    data_root = Path(args.data_path)
+    schema = load_schema(args.data_path)
+    teams_root = data_root / "teams"
+    store = TeamAdminStore(data_root / "admin.db")
+    registry = TeamRegistry(teams_root, schema, args.embedding_model)
+    logger.info(
+        "Multi-tenant mode: admin_db=%s, teams_root=%s, schema v%d",
+        data_root / "admin.db",
+        teams_root,
+        schema.version,
+    )
+
+    port = find_free_port(args.host, args.port)
+    if port != args.port:
+        logger.info("Port %d in use, using free port %d instead", args.port, port)
+
+    from app import build_multi_tenant_app
+
+    app = build_multi_tenant_app(
+        dataclasses.replace(args, port=port), schema, store, registry, logger
+    )
+
+    logger.info(
+        "Starting Engram (multi-tenant, merged MCP+dashboard+admin) on %s:%d",
+        args.host,
+        port,
+    )
+    uvicorn.run(app, host=args.host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

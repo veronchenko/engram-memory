@@ -9,10 +9,11 @@ an entry is edited via MCP or via this dashboard.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -33,12 +34,19 @@ class EntryIn(BaseModel):
     supersede: bool = False
 
 
-def create_app(kb: KnowledgeBase) -> FastAPI:
+def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
     """
     Build the dashboard FastAPI app.
 
     Args:
-        kb: KnowledgeBase instance to read/write through.
+        kb_resolver: Resolves the KnowledgeBase to read/write through for
+            a given request. Single-tenant callers pass a resolver that
+            always returns the same fixed instance. Multi-tenant callers
+            pass a resolver that reads the session (team role: the
+            session's own team; admin role: the `?team=` query param) and
+            raises `HTTPException(401)` when there is no valid session —
+            every route below propagates that as-is, and `index()`
+            additionally turns it into a redirect to `/login`.
 
     Returns:
         Configured FastAPI application.
@@ -46,7 +54,7 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
 
     app = FastAPI(title="Engram Dashboard")
 
-    def _check_type(entry_type: str) -> None:
+    def _check_type(kb: KnowledgeBase, entry_type: str) -> None:
         """
         Reject a write whose type is not declared in the schema.
 
@@ -55,6 +63,7 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
         neither writer can introduce a type `doctor` will later flag.
 
         Args:
+            kb: KnowledgeBase whose schema governs this request.
             entry_type: Type name from the request body.
 
         Raises:
@@ -69,18 +78,19 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
             )
 
     @app.get("/api/graph")
-    def get_graph(include_superseded: bool = False) -> dict:
-        return kb.get_graph(include_superseded=include_superseded)
+    def get_graph(request: Request, include_superseded: bool = False) -> dict:
+        return kb_resolver(request).get_graph(include_superseded=include_superseded)
 
     @app.get("/api/search")
     def search_entries(
+        request: Request,
         q: str,
         tags: list[str] | None = None,
         limit: int = 20,
         include_superseded: bool = False,
         entry_type: str | None = None,
     ) -> dict:
-        results = kb.search(
+        results = kb_resolver(request).search(
             q,
             tags=tags,
             limit=limit,
@@ -91,25 +101,27 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
 
     @app.get("/api/entries")
     def list_entries(
+        request: Request,
         tags: list[str] | None = None,
         limit: int = 500,
         include_superseded: bool = False,
     ) -> dict:
-        entries = kb.list_entries(
+        entries = kb_resolver(request).list_entries(
             tags=tags, limit=limit, include_superseded=include_superseded
         )
         return {"count": len(entries), "entries": entries}
 
     @app.get("/api/entries/{entry_id}")
-    def get_entry(entry_id: str) -> dict:
-        entry = kb.get(entry_id, with_relations=True)
+    def get_entry(request: Request, entry_id: str) -> dict:
+        entry = kb_resolver(request).get(entry_id, with_relations=True)
         if not entry:
             raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
         return entry
 
     @app.post("/api/entries")
-    def create_entry(body: EntryIn) -> dict:
-        _check_type(body.entry_type)
+    def create_entry(request: Request, body: EntryIn) -> dict:
+        kb = kb_resolver(request)
+        _check_type(kb, body.entry_type)
         result = kb.remember(
             body.title,
             body.content,
@@ -122,8 +134,9 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
         return result
 
     @app.patch("/api/entries/{entry_id}")
-    def update_entry(entry_id: str, body: EntryIn) -> dict:
-        _check_type(body.entry_type)
+    def update_entry(request: Request, entry_id: str, body: EntryIn) -> dict:
+        kb = kb_resolver(request)
+        _check_type(kb, body.entry_type)
         result = kb.remember(
             body.title,
             body.content,
@@ -138,19 +151,25 @@ def create_app(kb: KnowledgeBase) -> FastAPI:
         return result
 
     @app.delete("/api/entries/{entry_id}")
-    def delete_entry(entry_id: str) -> dict:
-        success = kb.delete(entry_id)
+    def delete_entry(request: Request, entry_id: str) -> dict:
+        success = kb_resolver(request).delete(entry_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
         return {"success": True, "id": entry_id}
 
     @app.get("/api/tags")
-    def get_tags() -> dict:
-        tag_list = kb.list_tags()
+    def get_tags(request: Request) -> dict:
+        tag_list = kb_resolver(request).list_tags()
         return {"count": len(tag_list), "tags": tag_list}
 
     @app.get("/")
-    def index() -> FileResponse:
+    def index(request: Request):
+        try:
+            kb_resolver(request)
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                return RedirectResponse("/login")
+            raise
         return FileResponse(_STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

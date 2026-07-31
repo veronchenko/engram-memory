@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Engram — log in</title>
+  <link rel="stylesheet" href="/admin/static/admin.css">
+  <style>
+    body { display: flex; align-items: center; justify-content: center; height: 100vh; padding: 0; }
+    .login-form { background: var(--surface); border: 1px solid var(--border); padding: var(--space-6);
+                  border-radius: var(--radius-lg); min-width: 280px; }
+    .login-form h1 { margin: 0 0 var(--space-4); }
+    .login-form input { width: 100%; margin-bottom: var(--space-4); }
+    .login-form button { width: 100%; }
+    .error { color: var(--danger); margin: 0 0 var(--space-4); font-size: var(--text-base); }
+  </style>
+</head>
+<body>
+  <form class="login-form" method="post" action="/login">
+    <h1>Engram</h1>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <label for="f-key" class="sr-only">API key</label>
+    <input id="f-key" type="password" name="key" placeholder="API key" required autofocus>
+    <button type="submit" class="primary">Log in</button>
+  </form>
+</body>
+</html>

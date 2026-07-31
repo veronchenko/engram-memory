@@ -33,6 +33,12 @@ COPY src/ ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Editable install so the `engram` console script (admin CLI) is on PATH,
+# without moving the flat module layout server.py/config.py/... already
+# rely on (schema.py resolves schema.json relative to its own file, not
+# via package resources — an editable install keeps that path valid).
+RUN pip install --no-cache-dir -e .
+
 RUN mkdir -p /knowledge && chown engram:engram /knowledge
 USER engram
 
@@ -49,6 +55,13 @@ ENV ENGRAM_EMBEDDING_MODEL=minishlab/potion-multilingual-128M
 # Dashboard (API + frontend) runs as a second process alongside the MCP
 # backend by default. Set to 0/false/no to run the backend only.
 ENV ENGRAM_ENABLE_DASHBOARD=1
+# Multi-tenant (VPS, several teams) mode is off by default — single-tenant
+# stdio/local usage is unaffected either way. Turning it on requires also
+# setting ENGRAM_TRANSPORT=streamable-http (or sse), ENGRAM_PUBLIC_URL, and
+# ENGRAM_ADMIN_API_KEY via `docker run -e` — none have a safe default.
+ENV ENGRAM_MULTI_TENANT=0
+ENV ENGRAM_ADMIN_API_HOST=127.0.0.1
+ENV ENGRAM_ADMIN_API_PORT=8194
 
 # Data volume
 VOLUME /knowledge

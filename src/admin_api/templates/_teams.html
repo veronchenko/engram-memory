@@ -1,0 +1,41 @@
+<div id="teams" aria-live="polite">
+  {% if error %}
+  <p class="banner error" role="alert">{{ error }}</p>
+  {% endif %}
+  {% if new_key %}
+  <p class="banner">
+    Team <strong>{{ new_key.name }}</strong> created. API key (shown once):
+    <code>{{ new_key.api_key }}</code>
+  </p>
+  {% endif %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Folder</th><th>Created</th><th>Status</th><th></th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for t in teams %}
+        <tr>
+          <td>{{ t.name }}</td>
+          <td>{{ t.folder }}</td>
+          <td>{{ t.created_at }}</td>
+          <td>
+            <span class="status-pill{{ ' revoked' if t.revoked_at else '' }}">
+              {{ "revoked" if t.revoked_at else "active" }}
+            </span>
+          </td>
+          <td><a href="/?team={{ t.name }}">View dashboard</a></td>
+          <td>
+            {% if not t.revoked_at %}
+            <button type="button" class="danger" data-revoke-name="{{ t.name }}"
+              hx-post="/admin/teams/{{ t.name }}/revoke" hx-target="#teams" hx-swap="outerHTML" hx-trigger="confirmed">
+              Revoke
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

@@ -1109,4 +1109,127 @@ class TestQueryLog:
 
         _call_tool(mcp, "search", {"query": "anything"})
 
+
+# ---------------------------------------------------------------------------
+# Multi-tenant routing (TeamRegistry, TeamTokenVerifier, kb_provider)
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterToolsAcceptsCallableKb:
+    """register_tools() must work with either a fixed KnowledgeBase or a resolver."""
+
+    def test_callable_kb_is_invoked_per_call(self, tmp_path: Path) -> None:
+        """A zero-arg kb resolver is called (not just captured once) per tool call."""
+
+        kb = KnowledgeBase(str(tmp_path))
+        calls = {"count": 0}
+
+        def kb_provider() -> KnowledgeBase:
+            calls["count"] += 1
+            return kb
+
+        mcp = FastMCP(name="test-multi-tenant")
+        # Pass schema explicitly so registration itself doesn't need to
+        # resolve kb_provider() once just to read its default schema —
+        # isolates the per-tool-call resolution this test is about.
+        register_tools(mcp, kb_provider, logging.getLogger("test_server"), kb.schema)
+
+        _call_tool(mcp, "tags", {})
+        _call_tool(mcp, "tags", {})
+
+        assert calls["count"] == 2
+
+    def test_callable_kb_results_match_fixed_kb(self, tmp_path: Path) -> None:
+        """Behaviour is identical whether kb is fixed or resolved per call."""
+
+        kb = KnowledgeBase(str(tmp_path))
+        kb.remember("Widget", "A widget.", ["test"], "snippet")
+
+        mcp = FastMCP(name="test-multi-tenant")
+        register_tools(mcp, lambda: kb, logging.getLogger("test_server"))
+
+        result = _call_tool(mcp, "search", {"query": "widget"})
+        assert result["count"] == 1
+
+
+class TestTeamRegistry:
+    """TeamRegistry — lazy, cached per-team KnowledgeBase resolution."""
+
+    def test_get_builds_and_caches_per_folder(self, tmp_path: Path) -> None:
+        from schema import load_schema
+        from server import TeamRegistry
+
+        registry = TeamRegistry(tmp_path / "teams", load_schema(str(tmp_path)), "minishlab/potion-multilingual-128M")
+
+        first = registry.get("acme")
+        second = registry.get("acme")
+
+        assert first is second
+        assert (tmp_path / "teams" / "acme").exists()
+
+    def test_different_folders_get_different_instances(self, tmp_path: Path) -> None:
+        from schema import load_schema
+        from server import TeamRegistry
+
+        registry = TeamRegistry(tmp_path / "teams", load_schema(str(tmp_path)), "minishlab/potion-multilingual-128M")
+
+        acme_kb = registry.get("acme")
+        beta_kb = registry.get("beta")
+
+        assert acme_kb is not beta_kb
+        acme_kb.remember("Acme Only", "Body.", ["test"], "snippet")
+        assert len(beta_kb.list_entries()) == 0
+
+    def test_resolve_current_without_access_token_raises(self, tmp_path: Path) -> None:
+        from schema import load_schema
+        from server import TeamRegistry
+
+        registry = TeamRegistry(tmp_path / "teams", load_schema(str(tmp_path)), "minishlab/potion-multilingual-128M")
+
+        with pytest.raises(PermissionError):
+            registry.resolve_current()
+
+
+class TestTeamTokenVerifier:
+    """TeamTokenVerifier — bearer token -> AccessToken(client_id=folder)."""
+
+    def test_valid_token_resolves_to_folder(self, tmp_path: Path) -> None:
+        from server import TeamTokenVerifier
+        from team_admin import TeamAdminStore
+
+        store = TeamAdminStore(tmp_path / "admin.db")
+        _, api_key = store.add_team("acme")
+
+        verifier = TeamTokenVerifier(store)
+        token = asyncio.new_event_loop().run_until_complete(verifier.verify_token(api_key))
+
+        assert token is not None
+        assert token.client_id == "acme"
+
+    def test_unknown_token_returns_none(self, tmp_path: Path) -> None:
+        from server import TeamTokenVerifier
+        from team_admin import TeamAdminStore
+
+        store = TeamAdminStore(tmp_path / "admin.db")
+        verifier = TeamTokenVerifier(store)
+
+        token = asyncio.new_event_loop().run_until_complete(
+            verifier.verify_token("not-a-real-key")
+        )
+
+        assert token is None
+
+    def test_revoked_token_returns_none(self, tmp_path: Path) -> None:
+        from server import TeamTokenVerifier
+        from team_admin import TeamAdminStore
+
+        store = TeamAdminStore(tmp_path / "admin.db")
+        _, api_key = store.add_team("acme")
+        store.revoke_team("acme")
+
+        verifier = TeamTokenVerifier(store)
+        token = asyncio.new_event_loop().run_until_complete(verifier.verify_token(api_key))
+
+        assert token is None
+
         assert not list(tmp_path.glob("*.jsonl"))

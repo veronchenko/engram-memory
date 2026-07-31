@@ -29,7 +29,7 @@ def kb(tmp_path: Path) -> KnowledgeBase:
 
 @pytest.fixture()
 def client(kb: KnowledgeBase) -> TestClient:
-    return TestClient(create_app(kb))
+    return TestClient(create_app(lambda request: kb))
 
 
 def test_graph_reflects_relations(kb: KnowledgeBase, client: TestClient) -> None:

@@ -140,6 +140,9 @@ class ServerSettings:
     host: str
     port: int
     embedding_model: str
+    multi_tenant: bool
+    public_url: str
+    admin_api_key: str
 
 
 def parse_server_args(argv: list[str] | None = None) -> ServerSettings:
@@ -188,6 +191,35 @@ def parse_server_args(argv: list[str] | None = None) -> ServerSettings:
             f"(env: ENGRAM_EMBEDDING_MODEL, default: {DEFAULT_EMBEDDING_MODEL})"
         ),
     )
+    parser.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        default=env("MULTI_TENANT", "") == "1",
+        help=(
+            "Serve several teams from one process: --data-path becomes a "
+            "root of admin.db + teams/<name>/, and every request must carry "
+            "a bearer token issued by `engram add-team` (env: "
+            "ENGRAM_MULTI_TENANT=1, default: off). Independent of "
+            "--transport — stdio ignores this flag."
+        ),
+    )
+    parser.add_argument(
+        "--public-url",
+        default=env("PUBLIC_URL", ""),
+        help=(
+            "Externally reachable base URL (e.g. https://engram.example.com), "
+            "required with --multi-tenant — used as the OAuth resource-server "
+            "identifier for token validation (env: ENGRAM_PUBLIC_URL)"
+        ),
+    )
+    parser.add_argument(
+        "--admin-api-key",
+        default=env("ADMIN_API_KEY", ""),
+        help=(
+            "Required with --multi-tenant: bearer token for the admin JSON "
+            "API and the admin/team browser login (env: ENGRAM_ADMIN_API_KEY)"
+        ),
+    )
 
     args = parser.parse_args(argv)
     return ServerSettings(
@@ -196,6 +228,9 @@ def parse_server_args(argv: list[str] | None = None) -> ServerSettings:
         host=args.host,
         port=args.port,
         embedding_model=args.embedding_model,
+        multi_tenant=args.multi_tenant,
+        public_url=args.public_url,
+        admin_api_key=args.admin_api_key,
     )
 
 
@@ -260,4 +295,86 @@ def parse_dashboard_args(argv: list[str] | None = None) -> DashboardSettings:
         host=args.host,
         port=args.port,
         embedding_model=args.embedding_model,
+    )
+
+
+# ---------------------------------------------------------------------------
+# admin_api.py CLI/env settings
+# ---------------------------------------------------------------------------
+
+# Admin API is loopback-only by design (see engram_memory decision on
+# multi-tenant VPS deployment) — not proxied by nginx, only reachable via
+# `docker exec` + the `engram` CLI.
+ADMIN_API_DEFAULT_HOST: str = "127.0.0.1"
+ADMIN_API_DEFAULT_PORT: int = 8194
+
+
+@dataclass(frozen=True)
+class AdminApiSettings:
+    """Resolved admin API settings (CLI args win over ENGRAM_* env vars)."""
+
+    data_path: str
+    host: str
+    port: int
+    api_key: str
+
+
+def parse_admin_api_args(argv: list[str] | None = None) -> AdminApiSettings:
+    """
+    Parse admin API CLI arguments, falling back to ENGRAM_* env vars.
+
+    Args:
+        argv: Argument list to parse; defaults to sys.argv[1:].
+
+    Returns:
+        Resolved AdminApiSettings.
+
+    Raises:
+        SystemExit: no API key was supplied via --api-key or
+            ENGRAM_ADMIN_API_KEY — the admin surface refuses to start
+            unauthenticated.
+    """
+
+    parser = argparse.ArgumentParser(description="Engram Admin API")
+    parser.add_argument(
+        "--data-path",
+        default=env("DATA_PATH", "/knowledge"),
+        help="Root path for team data (env: ENGRAM_DATA_PATH, default: /knowledge)",
+    )
+    parser.add_argument(
+        "--host",
+        default=env("ADMIN_API_HOST", ADMIN_API_DEFAULT_HOST),
+        help=(
+            "Listen address (env: ENGRAM_ADMIN_API_HOST, default: "
+            f"{ADMIN_API_DEFAULT_HOST}). Keep this on loopback — the admin "
+            "API is not meant to be reachable outside the container."
+        ),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(env("ADMIN_API_PORT", str(ADMIN_API_DEFAULT_PORT))),
+        help=(
+            "Listen port (env: ENGRAM_ADMIN_API_PORT, default: "
+            f"{ADMIN_API_DEFAULT_PORT})"
+        ),
+    )
+    parser.add_argument(
+        "--api-key",
+        default=env("ADMIN_API_KEY"),
+        help="Required bearer token for admin routes (env: ENGRAM_ADMIN_API_KEY)",
+    )
+
+    args = parser.parse_args(argv)
+    if not args.api_key:
+        parser.error(
+            "--api-key or ENGRAM_ADMIN_API_KEY is required — the admin API "
+            "refuses to start unauthenticated"
+        )
+
+    return AdminApiSettings(
+        data_path=args.data_path,
+        host=args.host,
+        port=args.port,
+        api_key=args.api_key,
     )

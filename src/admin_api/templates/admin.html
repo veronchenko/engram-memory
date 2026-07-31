@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Engram — admin</title>
+  <script src="/admin/static/htmx.min.js"></script>
+  <link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+  <header>
+    <h1>Teams</h1>
+    <form method="post" action="/logout"><button type="submit">Log out</button></form>
+  </header>
+
+  <form hx-post="/admin/teams" hx-target="#teams" hx-swap="outerHTML">
+    <label for="f-team-name" class="sr-only">Team name</label>
+    <input id="f-team-name" type="text" name="name" placeholder="team-name" required pattern="[a-z0-9][a-z0-9_-]{0,63}">
+    <button type="submit" class="primary">Add team</button>
+  </form>
+
+  {% include "_teams.html" %}
+
+  <script>
+    // Two-click confirm for destructive team-revoke buttons, mirroring the
+    // dashboard's non-modal confirm-delete pattern (index.html). Delegated
+    // on document.body — which htmx never replaces — so the binding
+    // survives every "#teams" outerHTML swap without duplicating.
+    const revokeTimers = new WeakMap();
+    document.body.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-revoke-name]");
+      if (!btn) return;
+      if (!btn.classList.contains("confirming")) {
+        btn.classList.add("confirming");
+        btn.textContent = "Confirm revoke?";
+        revokeTimers.set(btn, setTimeout(() => {
+          btn.classList.remove("confirming");
+          btn.textContent = "Revoke";
+        }, 4000));
+        return;
+      }
+      clearTimeout(revokeTimers.get(btn));
+      btn.dispatchEvent(new Event("confirmed"));
+    });
+  </script>
+</body>
+</html>

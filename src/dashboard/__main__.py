@@ -52,7 +52,7 @@ def main() -> None:
     backend.warm_up()
     kb = KnowledgeBase(args.data_path, backend=backend, schema=schema)
 
-    app = create_app(kb)
+    app = create_app(lambda request: kb)
 
     port = find_free_port(args.host, args.port)
     if port != args.port:

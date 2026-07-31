@@ -361,11 +361,25 @@
         </label>
       </div>
       <div class="topbar-actions">
+        <a id="team-badge" href="/admin" hidden></a>
         <div id="spinner" role="status" aria-label="Loading"></div>
         <button id="btn-new" class="primary">+ New entry</button>
       </div>
     </div>
-    <canvas id="graph" tabindex="0" role="img" aria-label="Knowledge graph. Click a node to view its entry."></canvas>
+    <script>
+      // Multi-tenant only: an admin session viewing a specific team's
+      // dashboard arrives here via /?team=<name> (see the admin UI's
+      // "View dashboard" links). Single-tenant has no ?team param, so
+      // this stays hidden — no-op there.
+      (() => {
+        const team = new URLSearchParams(location.search).get("team");
+        if (!team) return;
+        const badge = document.getElementById("team-badge");
+        badge.textContent = `Team: ${team} — back to admin`;
+        badge.hidden = false;
+      })();
+    </script>
+    <canvas id="graph" tabindex="0" role="img" aria-label="Knowledge graph. Click a node to view its entry, or use arrow keys to move between nodes and Enter to open one."></canvas>
     <div id="legend-wrap">
       <div id="help-popover" role="dialog" aria-label="Entry types and graph controls" hidden>
         <section>
@@ -443,6 +457,7 @@ let nodes = [];
 let edges = [];
 let selectedId = null;
 let hoveredNode = null;
+let keyboardFocusedNode = null;
 let dragging = null;
 let panX = 0, panY = 0, zoom = 1;
 let panning = false, panStart = null, panMoved = false;
@@ -1177,6 +1192,15 @@ function draw() {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
+    if (node === keyboardFocusedNode) {
+      ctx.lineWidth = 2 / zoom;
+      ctx.strokeStyle = "#6ea8fe";
+      ctx.setLineDash([4 / zoom, 3 / zoom]);
+      ctx.globalAlpha = alpha;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+    }
   }
 
   // Text labels (node titles + edge relation names) share one collision
@@ -1342,6 +1366,37 @@ canvas.addEventListener("wheel", (ev) => {
   zoom = Math.min(3, Math.max(0.2, zoom * (ev.deltaY < 0 ? 1.1 : 0.9)));
   dirty = true;
 }, { passive: false });
+
+canvas.addEventListener("focus", () => {
+  if (!keyboardFocusedNode && visibleNodes.length) {
+    keyboardFocusedNode = visibleNodes[0];
+    announce(`${keyboardFocusedNode.title}, ${keyboardFocusedNode.type}`);
+    dirty = true;
+  }
+});
+canvas.addEventListener("blur", () => {
+  keyboardFocusedNode = null;
+  dirty = true;
+});
+canvas.addEventListener("keydown", (ev) => {
+  if (!visibleNodes.length) return;
+  const idx = keyboardFocusedNode ? visibleNodes.indexOf(keyboardFocusedNode) : -1;
+  if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
+    ev.preventDefault();
+    keyboardFocusedNode = visibleNodes[(idx + 1 + visibleNodes.length) % visibleNodes.length];
+    announce(`${keyboardFocusedNode.title}, ${keyboardFocusedNode.type}`);
+    dirty = true;
+  } else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
+    ev.preventDefault();
+    keyboardFocusedNode = visibleNodes[(idx - 1 + visibleNodes.length) % visibleNodes.length];
+    announce(`${keyboardFocusedNode.title}, ${keyboardFocusedNode.type}`);
+    dirty = true;
+  } else if ((ev.key === "Enter" || ev.key === " ") && keyboardFocusedNode) {
+    ev.preventDefault();
+    openEntry(keyboardFocusedNode.id);
+    focusNodeOnGraph(keyboardFocusedNode.id);
+  }
+});
 
 function isMobile() {
   return window.matchMedia("(max-width: 720px)").matches;
