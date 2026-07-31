@@ -26,6 +26,7 @@ plugins/
     │   ├── hooks.json                <- event → command wiring
     │   ├── engram_remember_gate.py
     │   ├── engram_session_start.py
+    │   ├── engram_change_tracker.py
     │   ├── engram_stop_prompt.py
     │   ├── engram_session_end_cleanup.py
     │   └── _hooklog.py               <- shared debug-logging helper
@@ -56,7 +57,7 @@ Codex simply won't load it, same as any other unrecognized directory.
 
 - **`ENGRAM_SPEC.md`** — verbatim copy of `~/.claude/ENGRAM_SPEC.md`, the
   global instructions file that defines the "when to search"/"when to write"
-  rules the four hooks below mechanically enforce. Kept here so the hook
+  rules the five hooks below mechanically enforce. Kept here so the hook
   logic and the policy it's enforcing sit side by side for reading.
   **The live file is `~/.claude/ENGRAM_SPEC.md`** — this copy is read-only
   reference. It pulls in `@ENGRAM_TEMPLATES.md` for the entry-type table and
@@ -76,7 +77,7 @@ Codex simply won't load it, same as any other unrecognized directory.
 as a Claude Code plugin agent it loads directly from here, so there's only
 one live copy.
 
-## The four hooks
+## The five hooks
 
 Defined in `hooks/hooks.json`:
 
@@ -87,44 +88,68 @@ Defined in `hooks/hooks.json`:
   the system temp dir (`engram_searched_<session_id>.txt`); on `remember` it
   checks that marker and denies the call (`permissionDecision: "deny"`) if
   it's missing, telling the model to search first. Session-level gate — any
-  prior search/recall in the session satisfies it, regardless of topic.
+  prior search/recall in the session satisfies it, regardless of topic. On a
+  successful `remember` it also resets both Stop-hook counters (see below) —
+  a remember satisfies whichever trigger was accumulating, whether or not
+  either had actually reached its threshold yet.
 - **`SessionStart`** (`engram_session_start.py`) — fires once per new
   session, unconditionally reminds to search Engram
   (`mcp__engram__search`/`recall`) before starting work, per the "When to
   search Engram" rule (mandatory, every request, not conditional on
   relevance).
-- **`Stop`** (`engram_stop_prompt.py`) — fires on every Stop event, but only
-  emits the reminder every `ENGRAM_STOP_INTERVAL`-th time in a session
-  (default 3). On the other turns it exits silently and lets the session
-  stop normally. When it does fire, the reminder asks the model to check
-  the "When to write to Engram" trigger list (built/changed something,
-  chose among alternatives, learned something non-obvious, resolved a
-  diagnostic, ran a procedure, captured a preference, wrote a reusable
-  snippet) and blocks once so the model can call `mcp__engram__remember`
-  before finishing.
+- **`PostToolUse`** (`engram_change_tracker.py`, matcher
+  `Edit|Write|NotebookEdit|Bash`) — increments a per-session change-counter
+  (`engram_change_count_<session_id>.txt`) on every `Edit`/`Write`/
+  `NotebookEdit` call, and on `Bash` only when the command matches
+  `git commit`. One tool call = +1, uniformly — not weighted by diff size,
+  not deduplicated per file. Research/web tools (`WebSearch`, `WebFetch`,
+  context7) are deliberately not counted, to keep the signal restricted to
+  actual code/config changes.
+- **`Stop`** (`engram_stop_prompt.py`) — hybrid of two independent triggers,
+  checked in this order:
+  1. **Change-counter** (mechanical): if `engram_change_count_<session_id>.txt`
+     has reached `ENGRAM_CHANGE_THRESHOLD` (default 15), blocks with a
+     reason stating the fact plainly ("N file-editing tool calls since the
+     last remember") but, like the self-report reason, still lets the model
+     decide nothing is worth remembering and proceed — `remember` is not
+     mandatory just because edits happened.
+  2. **Self-report** (judgment-based): otherwise, blocks every
+     `ENGRAM_STOP_INTERVAL`-th Stop event (default 5) and asks the model to
+     review the transcript against the "When to write to Engram" trigger
+     list (built/changed something, chose among alternatives, learned
+     something non-obvious, resolved a diagnostic, ran a procedure,
+     captured a preference, wrote a reusable snippet). This is the only
+     backstop for work the change-counter structurally can't see — a
+     decision made purely in conversation, with no tool call at all.
+
+  Whichever trigger fires resets **both** counters, so the two mechanisms
+  never double-block back-to-back for the same underlying work.
 - **`SessionEnd`** (`engram_session_end_cleanup.py`) — fires when the
   session actually ends (not on every Stop) and deletes that session's
-  `engram_stop_count_<session_id>.txt` state file, so the temp dir doesn't
-  accumulate one stale counter file per session forever. No decision
-  control on this event (can't block exit, can't message Claude) — purely
-  cleanup. **Codex-only gap:** Codex's hook event set (`PreToolUse`,
+  `engram_stop_count_<session_id>.txt`, `engram_change_count_<session_id>.txt`,
+  and `engram_searched_<session_id>.txt` state files, so the temp dir doesn't
+  accumulate stale files per session forever. No decision control on this
+  event (can't block exit, can't message Claude) — purely cleanup.
+  **Codex-only gap:** Codex's hook event set (`PreToolUse`,
   `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`,
   `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`)
   has no `SessionEnd` equivalent, so this entry is silently ignored there
-  (unknown hook-event keys don't fail parsing) and the two temp state files
-  simply accumulate one pair per Codex session instead of being swept — not
+  (unknown hook-event keys don't fail parsing) and the temp state files
+  simply accumulate one set per Codex session instead of being swept — not
   worth a workaround, since they're tiny and the OS temp dir clears
   periodically anyway.
 
-All four hooks are plain Python command scripts (`type: "command"`), not
+All five hooks are plain Python command scripts (`type: "command"`), not
 `type: "prompt"` hooks — `SessionStart` and `SessionEnd` aren't in Claude
-Code's prompt-hook-supported event list, and `Stop`/`PreToolUse` need
-persisted state (the per-session stop counter, the per-session search
-marker) that a stateless prompt hook can't keep. Both state files live
-under the system temp dir (`engram_stop_count_<session_id>.txt`,
-`engram_searched_<session_id>.txt`) since each hook invocation is a fresh
-process with no memory of prior calls. Override the Stop interval with the
-`ENGRAM_STOP_INTERVAL` environment variable.
+Code's prompt-hook-supported event list, and `Stop`/`PreToolUse`/
+`PostToolUse` need persisted state (the per-session stop counter, the
+per-session change counter, the per-session search marker) that a stateless
+prompt hook can't keep. All three state files live under the system temp
+dir (`engram_stop_count_<session_id>.txt`,
+`engram_change_count_<session_id>.txt`, `engram_searched_<session_id>.txt`)
+since each hook invocation is a fresh process with no memory of prior calls.
+Override the Stop interval with `ENGRAM_STOP_INTERVAL` and the change
+threshold with `ENGRAM_CHANGE_THRESHOLD`.
 
 `${CLAUDE_PLUGIN_ROOT}` in `hooks/hooks.json` resolves to this plugin's
 installed/cached directory at runtime under either client (Codex sets it as
@@ -235,6 +260,8 @@ Sanity check after installing: start a session and confirm
 `hooks/logs/debug.log` (next to the scripts, inside the installed plugin's
 cache directory) gets a `session_start` line; call `remember` before ever
 calling `search`/`recall` and confirm it's denied; call `search` and retry
-`remember` and confirm it now succeeds; end the session and confirm both
-`engram_stop_count_<session_id>.txt` and `engram_searched_<session_id>.txt`
-temp files are gone afterward (Claude Code only — see the Codex gap above).
+`remember` and confirm it now succeeds; make 15 Edit calls in a row and
+confirm Stop blocks with the change-counter reason before finishing; end the
+session and confirm `engram_stop_count_<session_id>.txt`,
+`engram_change_count_<session_id>.txt`, and `engram_searched_<session_id>.txt`
+temp files are all gone afterward (Claude Code only — see the Codex gap above).

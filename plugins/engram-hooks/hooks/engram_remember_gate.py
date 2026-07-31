@@ -41,6 +41,17 @@ def _marker_path(session_id: str) -> str:
     return os.path.join(tempfile.gettempdir(), f"engram_searched_{session_id}.txt")
 
 
+def _reset_stop_counters(session_id: str) -> None:
+    """Clear engram_stop_prompt.py's counters — a remember means both are
+    satisfied regardless of whether either had reached its threshold."""
+    tmp = tempfile.gettempdir()
+    for name in (f"engram_stop_count_{session_id}.txt", f"engram_change_count_{session_id}.txt"):
+        try:
+            os.remove(os.path.join(tmp, name))
+        except FileNotFoundError:
+            pass
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -62,7 +73,8 @@ def main() -> None:
 
     if tool_name == REMEMBER_TOOL:
         if os.path.exists(marker):
-            log("PreToolUse", f"session={session_id} remember allowed, marker present")
+            _reset_stop_counters(session_id)
+            log("PreToolUse", f"session={session_id} remember allowed, marker present, stop counters reset")
             return
         log("PreToolUse", f"session={session_id} remember denied, no prior search/recall")
         print(json.dumps({

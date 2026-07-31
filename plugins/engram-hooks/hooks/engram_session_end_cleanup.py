@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """SessionEnd hook: delete this session's hook state files.
 
-engram_stop_prompt.py persists a per-session Stop count, and
-engram_remember_gate.py persists a per-session search/recall marker, each to
-a file under the system temp dir (see their docstrings). SessionEnd hooks
+engram_stop_prompt.py persists a per-session Stop count, engram_change_tracker.py
+persists a per-session file-edit count, and engram_remember_gate.py persists
+a per-session search/recall marker, each to a file under the system temp dir
+(see their docstrings). SessionEnd hooks
 can't block session termination or talk to Claude, only run cleanup, so this
 just removes those files. Fails open silently — a missing file, permission
 error, or any other issue here must never surface to the user or block
@@ -27,6 +28,7 @@ def _state_paths(session_id: str) -> list[str]:
     tmp = tempfile.gettempdir()
     return [
         os.path.join(tmp, f"engram_stop_count_{session_id}.txt"),
+        os.path.join(tmp, f"engram_change_count_{session_id}.txt"),
         os.path.join(tmp, f"engram_searched_{session_id}.txt"),
     ]
 
