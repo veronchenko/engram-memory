@@ -42,18 +42,9 @@ STOP_INTERVAL = int(os.environ.get("ENGRAM_STOP_INTERVAL", "5"))
 CHANGE_THRESHOLD = int(os.environ.get("ENGRAM_CHANGE_THRESHOLD", "15"))
 
 SELF_REPORT_PROMPT = """
-Review the recent turns in this session's transcript (since the last time this reminder fired, or since the session started if it hasn't fired yet) against the rules for when to write to the Engram persistent-memory MCP server.
-Across those turns, did the session:
-(a) build or change something concrete (implemented/integrated/added/fixed) — via Edit, Write, NotebookEdit, or a `git commit`;
-(b) make a choice among alternatives (library, pattern, schema, endpoint shape);
-(c) surface a surprising or non-obvious fact about a project (a constraint, a gotcha, a cross-project dependency);
-(d) resolve a diagnostic (root cause + fix);
-(e) execute a non-trivial procedure;
-(f) capture a dev/tooling/project-structure preference the user stated or corrected;
-or (g) produce a reusable snippet/pattern that took real effort?
-If any of these happened AND mcp__engram__remember was NOT called for it, block with reason: 'Did the last few turns produce something that needs to survive past this conversation?
-If so, call mcp__engram__remember before finishing. If you already judged there is nothing worth remembering, ignore this and proceed.'
-If mcp__engram__remember already covered it, or this was pure read/Q&A with no new fact, or the assistant's immediately preceding message already addressed this exact reminder, approve with no message.
+Review the recent turns in this session's transcript (since the last time this reminder fired, or since the session started if it hasn't fired yet) against the "When to write to Engram" rule in your persistent-memory specification.
+If it applies and mcp__engram__remember was NOT called for it, call mcp__engram__remember before finishing. If you already judged there is nothing worth remembering, ignore this and proceed.
+If mcp__engram__remember already covered it, or this was pure read/Q&A with no new fact, or the assistant's immediately preceding message already addressed this exact reminder, say nothing about this reminder and continue.
 """
 
 

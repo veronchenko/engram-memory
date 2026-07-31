@@ -24,8 +24,8 @@ If this project directory has no Engram hub entry yet (search/list/tags turn up 
 
 
 def main() -> None:
-    if os.environ.get("ENGRAM_HOOKS_DISABLE") == "1":
-        log("SessionStart", "disabled via ENGRAM_HOOKS_DISABLE, skipping")
+    if os.environ.get("ENGRAM_SESSION_START_DISABLE") == "1":
+        log("SessionStart", "disabled via ENGRAM_SESSION_START_DISABLE, skipping")
         return
     log("SessionStart", "emitting Engram search reminder")
     print(json.dumps({

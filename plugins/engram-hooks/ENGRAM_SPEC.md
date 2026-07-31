@@ -14,6 +14,10 @@ The KB is English-only: translate both entry content (before `remember`) and que
 
 - Before the first substantive action on every user request, and again when the request shifts to a new topic/context.
 
+## When to write to Engram
+
+Write when a turn produces something that won't survive past this conversation otherwise: built or changed something concrete, made a choice among alternatives, surfaced a non-obvious fact about a project, resolved a diagnostic, ran a non-trivial procedure, captured a stated preference, or produced a reusable snippet/pattern. Skip it for pure read/Q&A turns, or anything already captured by an earlier `remember` this session.
+
 ## Suggested links from remember
 
 `remember` returns `suggested_links` (never auto-added) — link only genuinely relevant ones: add a `kb://<id>#<type>` reference into the entry's content with a follow-up `remember` call (same `entry_id`).

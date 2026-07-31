@@ -3,8 +3,11 @@
 A self-contained plugin, installable in both **Claude Code** and **Codex**,
 that mechanically nudges an agent to use the Engram MCP memory server,
 instead of relying on it remembering an ENGRAM_SPEC.md instruction every
-turn. Prompts are kept in sync with the rules in `~/.claude/ENGRAM_SPEC.md`
-— update both together when that file changes.
+turn. The search-reminder prompt (`engram_session_start.py`) mirrors the
+"When to search"/"Project hygiene" rules in `~/.claude/ENGRAM_SPEC.md` —
+update both together when that file changes. The write-trigger list in
+`engram_stop_prompt.py`'s self-report prompt is hook-owned, not sourced
+from ENGRAM_SPEC.md (which has no "when to write" section).
 
 One plugin serves both agents: Codex's plugin loader discovers
 `.claude-plugin/plugin.json` as a documented OOTB-compatibility fallback (it
@@ -149,7 +152,9 @@ dir (`engram_stop_count_<session_id>.txt`,
 `engram_change_count_<session_id>.txt`, `engram_searched_<session_id>.txt`)
 since each hook invocation is a fresh process with no memory of prior calls.
 Override the Stop interval with `ENGRAM_STOP_INTERVAL` and the change
-threshold with `ENGRAM_CHANGE_THRESHOLD`.
+threshold with `ENGRAM_CHANGE_THRESHOLD`. Skip the SessionStart reminder
+only with `ENGRAM_SESSION_START_DISABLE=1` — it does not silence the
+other four hooks.
 
 `${CLAUDE_PLUGIN_ROOT}` in `hooks/hooks.json` resolves to this plugin's
 installed/cached directory at runtime under either client (Codex sets it as
