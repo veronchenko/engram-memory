@@ -21,15 +21,14 @@ mcp__engram__remember calls also reset both counters, via
 engram_remember_gate.py. stop_hook_active (set by Claude Code on the input
 JSON) avoids re-blocking in an infinite loop.
 
-Per-session counts are persisted to small state files in the system temp
-dir, keyed by session_id, since each invocation of this script is a fresh
-process with no memory of prior calls.
+Per-session counts are persisted via _session_state.py to a single JSON
+file per session in the system temp dir, since each invocation of this
+script is a fresh process with no memory of prior calls.
 """
 
 import json
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -37,6 +36,7 @@ try:
 except Exception:
     def log(hook_name: str, message: str) -> None:
         pass
+import _session_state as state
 
 STOP_INTERVAL = int(os.environ.get("ENGRAM_STOP_INTERVAL", "5"))
 CHANGE_THRESHOLD = int(os.environ.get("ENGRAM_CHANGE_THRESHOLD", "15"))
@@ -48,36 +48,9 @@ If mcp__engram__remember already covered it, or this was pure read/Q&A with no n
 """
 
 
-def _stop_count_path(session_id: str) -> str:
-    return os.path.join(tempfile.gettempdir(), f"engram_stop_count_{session_id}.txt")
-
-
-def _change_count_path(session_id: str) -> str:
-    return os.path.join(tempfile.gettempdir(), f"engram_change_count_{session_id}.txt")
-
-
-def _read_count(path: str) -> int:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return int(f.read().strip())
-    except (FileNotFoundError, ValueError):
-        return 0
-
-
-def _next_stop_count(session_id: str) -> int:
-    path = _stop_count_path(session_id)
-    count = _read_count(path) + 1
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(str(count))
-    return count
-
-
-def _reset_counters(session_id: str) -> None:
-    for path in (_stop_count_path(session_id), _change_count_path(session_id)):
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            pass
+def _reset_counters(session_state: dict) -> None:
+    session_state["change_count"] = 0
+    session_state["stop_count"] = 0
 
 
 def main() -> None:
@@ -91,11 +64,13 @@ def main() -> None:
         return
 
     session_id = payload.get("session_id", "unknown")
+    session_state = state.load(session_id)
 
-    change_count = _read_count(_change_count_path(session_id))
+    change_count = session_state["change_count"]
     if change_count >= CHANGE_THRESHOLD:
         log("Stop", f"session={session_id} change_count={change_count}/{CHANGE_THRESHOLD}, blocking (change-counter)")
-        _reset_counters(session_id)
+        _reset_counters(session_state)
+        state.save(session_id, session_state)
         print(json.dumps({
             "decision": "block",
             "reason": (
@@ -107,13 +82,16 @@ def main() -> None:
         }))
         return
 
-    count = _next_stop_count(session_id)
+    session_state["stop_count"] += 1
+    count = session_state["stop_count"]
     if count % STOP_INTERVAL != 0:
+        state.save(session_id, session_state)
         log("Stop", f"session={session_id} stop_count={count}/{STOP_INTERVAL}, letting stop proceed")
         return
 
     log("Stop", f"session={session_id} stop_count={count}/{STOP_INTERVAL}, blocking (self-report)")
-    _reset_counters(session_id)
+    _reset_counters(session_state)
+    state.save(session_id, session_state)
     print(json.dumps({
         "decision": "block",
         "reason": SELF_REPORT_PROMPT,

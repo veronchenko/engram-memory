@@ -3,20 +3,22 @@
 
 Fires on mcp__engram__search, mcp__engram__recall, and mcp__engram__remember
 (matcher covers all three so one script handles both sides of the gate).
-On search/recall it stamps a per-session marker file in the system temp dir.
-On remember it checks that marker: missing marker -> deny the tool call and
-tell the model to search first. This is a session-level gate (any prior
-search/recall in the session satisfies it) — it does not check topical
-relevance between the search and the remember.
+On search/recall it marks the session state "searched". On remember it
+checks that flag: missing -> deny the tool call and tell the model to
+search first. This is a session-level gate (any prior search/recall in the
+session satisfies it) — it does not check topical relevance between the
+search and the remember.
 
-State file is separate from the Stop-counter one so the two hooks don't
-clobber each other's state; SessionEnd cleanup removes both.
+On a successful remember it also resets engram_stop_prompt.py's counters
+(a remember satisfies whichever trigger was accumulating) and bumps
+remembers_count / last_remember_ts, which the statusline script reads —
+all via the shared per-session state in _session_state.py.
 """
 
 import json
 import os
 import sys
-import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -24,6 +26,7 @@ try:
 except Exception:
     def log(hook_name: str, message: str) -> None:
         pass
+import _session_state as state
 
 SEARCH_TOOLS = {"mcp__engram__search", "mcp__engram__recall"}
 REMEMBER_TOOL = "mcp__engram__remember"
@@ -37,21 +40,6 @@ DENY_REASON = (
 )
 
 
-def _marker_path(session_id: str) -> str:
-    return os.path.join(tempfile.gettempdir(), f"engram_searched_{session_id}.txt")
-
-
-def _reset_stop_counters(session_id: str) -> None:
-    """Clear engram_stop_prompt.py's counters — a remember means both are
-    satisfied regardless of whether either had reached its threshold."""
-    tmp = tempfile.gettempdir()
-    for name in (f"engram_stop_count_{session_id}.txt", f"engram_change_count_{session_id}.txt"):
-        try:
-            os.remove(os.path.join(tmp, name))
-        except FileNotFoundError:
-            pass
-
-
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -60,21 +48,23 @@ def main() -> None:
 
     session_id = payload.get("session_id", "unknown")
     tool_name = payload.get("tool_name", "")
-    marker = _marker_path(session_id)
 
     if tool_name in SEARCH_TOOLS:
-        try:
-            with open(marker, "w", encoding="utf-8") as f:
-                f.write(tool_name)
-            log("PreToolUse", f"session={session_id} marked searched via {tool_name}")
-        except OSError as exc:
-            log("PreToolUse", f"failed to write marker: {exc!r}")
+        session_state = state.load(session_id)
+        session_state["searched"] = True
+        state.save(session_id, session_state)
+        log("PreToolUse", f"session={session_id} marked searched via {tool_name}")
         return
 
     if tool_name == REMEMBER_TOOL:
-        if os.path.exists(marker):
-            _reset_stop_counters(session_id)
-            log("PreToolUse", f"session={session_id} remember allowed, marker present, stop counters reset")
+        session_state = state.load(session_id)
+        if session_state["searched"]:
+            session_state["change_count"] = 0
+            session_state["stop_count"] = 0
+            session_state["remembers_count"] += 1
+            session_state["last_remember_ts"] = time.time()
+            state.save(session_id, session_state)
+            log("PreToolUse", f"session={session_id} remember allowed, stop counters reset, remembers_count={session_state['remembers_count']}")
             return
         log("PreToolUse", f"session={session_id} remember denied, no prior search/recall")
         print(json.dumps({

@@ -13,7 +13,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -21,13 +20,10 @@ try:
 except Exception:
     def log(hook_name: str, message: str) -> None:
         pass
+import _session_state as state
 
 BASH_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
 EDIT_TOOLS = {"Edit", "Write", "NotebookEdit"}
-
-
-def _change_count_path(session_id: str) -> str:
-    return os.path.join(tempfile.gettempdir(), f"engram_change_count_{session_id}.txt")
 
 
 def main() -> None:
@@ -46,16 +42,10 @@ def main() -> None:
     elif tool_name not in EDIT_TOOLS:
         return
 
-    path = _change_count_path(session_id)
-    try:
-        with open(path, encoding="utf-8") as f:
-            count = int(f.read().strip())
-    except (FileNotFoundError, ValueError):
-        count = 0
-    count += 1
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(str(count))
-    log("PostToolUse", f"session={session_id} change_count={count} (tool={tool_name})")
+    session_state = state.load(session_id)
+    session_state["change_count"] += 1
+    state.save(session_id, session_state)
+    log("PostToolUse", f"session={session_id} change_count={session_state['change_count']} (tool={tool_name})")
 
 
 if __name__ == "__main__":
