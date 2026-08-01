@@ -2,8 +2,7 @@
 __pycache__/
 .coverage
 okf/
-.claude/*
-!.claude/skills/
+.claude/
 logs/
 venv/
 test_kb_data/
@@ -11,3 +10,6 @@ test_kb_data/
 external_research/
 .codegraph/
 eval/
+scripts/
+scratchpad/
+.impeccable/

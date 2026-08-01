@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Engram: Persistent Knowledge Base MCP Server"
+type: software
+authors:
+  - name: "Veronchenko"
+repository-code: "https://github.com/veronchenko/engram-memory"
+url: "https://hub.docker.com/r/foreigndmitryi/engram"
+license: MIT
+version: "0.12.1"
+date-released: "2026-08-01"
+keywords:
+  - mcp
+  - model-context-protocol
+  - agent-memory
+  - llm-memory
+  - rag
+  - hybrid-search
+  - semantic-search
+  - knowledge-base
+abstract: >
+  Engram is a self-hosted Model Context Protocol (MCP) server that gives
+  AI agents persistent memory across sessions and projects. Markdown files
+  serve as the source of truth, with a hybrid BM25 + local embedding search
+  index and typed graph relations between entries.

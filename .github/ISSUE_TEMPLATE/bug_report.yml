@@ -1,0 +1,46 @@
+name: Bug Report
+description: Report a problem with Engram
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio
+        - SSE
+        - streamable-http
+        - Multi-tenant (streamable-http + auth)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Engram version
+      description: See `VERSION` file or the Docker image tag you're running
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: doctor output (if relevant)
+      description: If this involves entry/index integrity, paste the output of the `doctor` MCP tool
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: text

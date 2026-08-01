@@ -1,6 +1,0 @@
-{
-  "files": ["src/dashboard/static/index.html"],
-  "insertBefore": "</body>",
-  "commentSyntax": "html",
-  "cspChecked": true
-}

@@ -1,0 +1,19 @@
+# Engram
+
+> Engram is a self-hosted Model Context Protocol (MCP) server that gives AI agents persistent memory across sessions and projects. Markdown files are the source of truth; a hybrid SQLite FTS5 (BM25) + local Model2Vec embedding search index (fused via Reciprocal Rank Fusion) provides retrieval, plus typed graph relations (`kb://uuid#type` links) between entries.
+
+Engram is not automatic conversation memory — it deliberately stores zero discoverable information. If a fact can be pulled from code, git history, config, or existing docs, it doesn't belong in Engram. What belongs: decisions and the alternatives they ruled out, root causes and fixes, procedures learned the hard way, preferences that should persist. An agent searches Engram before acting and writes to it after resolving something non-obvious.
+
+Eight MCP tools: `remember`, `recall`, `search`, `list`, `tags`, `forget`, `rebuild`, `doctor`. Entries are typed (`hub`, `decision`, `diagnostic`, `feature`, `procedure`, `integration`, `pattern`, `snippet`, `preference`, `idea`) via a JSON schema, support bi-temporal versioning (`supersede`), and link to each other via `kb://uuid#type` references resolved both directions on recall.
+
+## Docs
+
+- [README](https://github.com/veronchenko/engram-memory/blob/main/README.md): full feature list, architecture, quick start (stdio/SSE/streamable-http/multi-tenant), benchmark vs. a plain Markdown wiki, comparison with Mem0/Zep-Graphiti/LangMem
+- [CHANGELOG](https://github.com/veronchenko/engram-memory/blob/main/CHANGELOG.md): version history
+- [CONTRIBUTING](https://github.com/veronchenko/engram-memory/blob/main/CONTRIBUTING.md): how to contribute, test setup
+- [SECURITY](https://github.com/veronchenko/engram-memory/blob/main/SECURITY.md): vulnerability reporting
+
+## Deployment
+
+- Docker Hub image: https://hub.docker.com/r/foreigndmitryi/engram
+- Single container, self-hosted, no cloud dependency for search (local embedding model)

@@ -1,8 +1,32 @@
 # Engram — Persistent Knowledge Base MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents persistent memory. Markdown files as source of truth, hybrid keyword + semantic search, typed graph relations.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/foreigndmitryi/engram)](https://hub.docker.com/r/foreigndmitryi/engram)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](src/pyproject.toml)
+
+Engram is a self-hosted [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents persistent memory across sessions and projects. Markdown files as source of truth, hybrid keyword + semantic search, typed graph relations.
 
 **Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram)
+
+## Table of Contents
+
+- [Concept](#concept)
+- [Features](#features)
+- [Comparison](#comparison)
+- [Measured Against a Plain Markdown Wiki](#measured-against-a-plain-markdown-wiki)
+- [Design Patterns](#design-patterns)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Search](#search)
+- [Tools](#tools)
+- [Dashboard](#dashboard)
+- [Graph Relations](#graph-relations)
+- [Usage Examples](#usage-examples)
+- [Prompt Your Agent](#prompt-your-agent)
+- [Configuration](#configuration)
+- [Storage Format](#storage-format)
+- [Development](#development)
+- [License](#license)
 
 ## Concept
 
