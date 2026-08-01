@@ -34,7 +34,8 @@ plugins/
     │   ├── engram_session_end_cleanup.py
     │   └── _hooklog.py               <- shared debug-logging helper
     ├── agents/
-    │   └── engram-project-onboarder.md   <- Claude Code subagent only (see below)
+    │   ├── engram-project-onboarder.md       <- Claude Code subagent (loaded via the plugin)
+    │   └── engram-project-onboarder.codex.toml  <- same subagent, Codex format (see below)
     ├── ENGRAM_SPEC.md                <- reference copy, see below
     ├── ENGRAM_TEMPLATES.md           <- reference copy, see below
     └── README.md                     <- this file
@@ -48,13 +49,21 @@ does the equivalent for Codex, using Codex's own marketplace schema
 `category` — Codex requires these fields, unlike Claude's simpler
 bare-string `source`). Both marketplaces point at the same plugin directory.
 
-`agents/engram-project-onboarder.md` is Claude-Code-only: Codex's
-`plugin.json` schema has no `agents` field (only `name`, `version`,
-`description`, `keywords`, `skills`, `mcpServers`, `apps`, `hooks`,
-`interface` are recognized) — Codex's nearest equivalent to a Claude
-subagent is a `skills/*/SKILL.md`, which this plugin doesn't need since the
-onboarder is invoked as a dedicated subagent, not a skill. No action needed;
-Codex simply won't load it, same as any other unrecognized directory.
+`agents/engram-project-onboarder.md` doesn't carry over to Codex through the
+plugin install: Codex's `plugin.json` schema has no `agents` field (only
+`name`, `version`, `description`, `keywords`, `skills`, `mcpServers`, `apps`,
+`hooks`, `interface` are recognized), and Codex subagents aren't
+plugin-bundled at all — they're standalone TOML files under `~/.codex/agents/`
+(personal) or `.codex/agents/` (project-scoped), each requiring `name`,
+`description`, `developer_instructions`, with optional `mcp_servers` etc.
+`agents/engram-project-onboarder.codex.toml` in this folder is that same
+subagent's body ported to Codex's TOML shape (`mcp_servers = ["engram"]`,
+same procedure as the `.md` version, referencing `AGENTS.md` instead of
+`CLAUDE.md`). It isn't installed by `codex plugin add` — `scripts/install.{ps1,sh}`
+copies it to `~/.codex/agents/engram-project-onboarder.toml` as a separate
+step after the plugin install (see "Install" below). Installing by hand
+without the script: copy that file to `~/.codex/agents/engram-project-onboarder.toml`
+(or `.codex/agents/` for a project-scoped agent) yourself.
 
 ## Reference copies in this folder
 
@@ -234,14 +243,16 @@ From the repo root:
 ```
 codex plugin marketplace add ./plugins
 codex plugin add engram-hooks@engram-memory
+cp plugins/engram-hooks/agents/engram-project-onboarder.codex.toml ~/.codex/agents/engram-project-onboarder.toml
 ```
 
 (or `codex plugin marketplace add <repo>/plugins` from elsewhere, and
 `owner/repo` / a git URL for a shared/remote install, same as Claude Code).
 Codex's `hooks` feature (`CodexHooks`) is stable and enabled by default, so
 no `config.toml` feature flag is needed — installing and enabling the plugin
-is enough. The `engram-project-onboarder` agent doesn't carry over (see
-above); everything else does.
+is enough. The `engram-project-onboarder` agent doesn't ship with the plugin
+(see above) — the `cp` step is what actually places it, and `scripts/install.{ps1,sh}`
+does it automatically.
 
 ## Setup (fresh machine / new global config)
 
