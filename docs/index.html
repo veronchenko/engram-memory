@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Engram — Persistent Memory MCP Server for AI Agents</title>
+<meta name="description" content="Engram is a self-hosted Model Context Protocol (MCP) server that gives AI agents persistent memory. Markdown as source of truth, hybrid BM25 + embedding search, typed graph relations.">
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --bg:#0d1117; --bg-alt:#11161d; --border:#1f2733; --text:#e6edf3; --muted:#8b96a5;
+    --accent:#58a6ff; --accent2:#39d0d6; --code-bg:#161b22;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    line-height:1.6;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code, pre{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace}
+  code{background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em}
+  pre{background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:16px; overflow-x:auto; font-size:.85em}
+  pre code{background:none; padding:0}
+
+  .wrap{max-width:960px; margin:0 auto; padding:0 24px}
+
+  header.hero{
+    padding:80px 0 60px;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(88,166,255,.12), transparent 40%),
+      radial-gradient(circle at 85% 0%, rgba(57,208,214,.10), transparent 40%);
+    border-bottom:1px solid var(--border);
+  }
+  .badges{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px}
+  .badges img{height:20px; display:block}
+  h1{font-size:2.6rem; margin:0 0 8px; letter-spacing:-.02em}
+  .tagline{font-size:1.15rem; color:var(--muted); max-width:640px; margin:0 0 28px}
+  .cta{display:flex; gap:12px; flex-wrap:wrap}
+  .btn{
+    display:inline-block; padding:10px 18px; border-radius:8px; font-weight:600; font-size:.95rem;
+    border:1px solid var(--border);
+  }
+  .btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#04121c; border:none}
+  .btn-primary:hover{opacity:.9; text-decoration:none}
+  .btn-secondary{color:var(--text)}
+  .btn-secondary:hover{border-color:var(--accent); text-decoration:none}
+
+  section{padding:56px 0; border-bottom:1px solid var(--border)}
+  section:last-of-type{border-bottom:none}
+  h2{font-size:1.5rem; margin:0 0 24px}
+  .muted{color:var(--muted)}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px}
+  .card{background:var(--bg-alt); border:1px solid var(--border); border-radius:10px; padding:18px 20px}
+  .card h3{margin:0 0 8px; font-size:1rem}
+  .card p{margin:0; color:var(--muted); font-size:.92rem}
+
+  table{width:100%; border-collapse:collapse; font-size:.9rem}
+  th, td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--border)}
+  th{color:var(--muted); font-weight:600}
+  .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:16px; margin-top:20px}
+  .stat{background:var(--bg-alt); border:1px solid var(--border); border-radius:10px; padding:18px; text-align:center}
+  .stat .num{font-size:1.6rem; font-weight:700; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; background-clip:text; color:transparent}
+  .stat .label{color:var(--muted); font-size:.8rem; margin-top:4px}
+
+  .arch{font-family:ui-monospace,monospace; font-size:.8rem; color:var(--muted); white-space:pre; overflow-x:auto; background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:16px}
+
+  footer{padding:40px 0; text-align:center; color:var(--muted); font-size:.85rem}
+  footer a{margin:0 8px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="badges">
+      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
+      <img src="https://img.shields.io/docker/pulls/foreigndmitryi/engram" alt="Docker Pulls">
+      <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
+    </div>
+    <h1>Engram</h1>
+    <p class="tagline">A self-hosted <a href="https://modelcontextprotocol.io/" target="_blank" rel="noopener">Model Context Protocol</a> server that gives AI agents persistent memory across sessions and projects. Markdown files as source of truth, hybrid keyword + semantic search, typed graph relations.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/veronchenko/engram-memory">View on GitHub</a>
+      <a class="btn btn-secondary" href="https://hub.docker.com/r/foreigndmitryi/engram">Docker Hub</a>
+      <a class="btn btn-secondary" href="https://github.com/veronchenko/engram-memory#quick-start">Quick Start</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Concept</h2>
+    <p>Agent conversations end and take their context with them. Engram is the piece that survives: a knowledge base an agent searches <em>before</em> acting and writes to <em>after</em> resolving something non-obvious, so the next session — same project or a different one — starts with what was already learned instead of re-deriving it.</p>
+    <p>It deliberately stores <strong>zero discoverable information</strong>. If a fact can be pulled from code, git history, config files, or existing docs, it does not belong in Engram. What belongs: a decision and the alternatives it ruled out, a bug's root cause and fix, a procedure learned the hard way, a preference stated once that should hold from then on.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Features</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Hybrid search</h3>
+        <p>SQLite FTS5 (BM25) fused with cosine similarity over local Model2Vec embeddings via Reciprocal Rank Fusion — zero cloud dependency.</p>
+      </div>
+      <div class="card">
+        <h3>Typed graph relations</h3>
+        <p><code>kb://uuid#type</code> links resolved both directions on every recall, with optional second-hop traversal.</p>
+      </div>
+      <div class="card">
+        <h3>Schema-enforced entry types</h3>
+        <p><code>hub</code>, <code>decision</code>, <code>diagnostic</code>, <code>feature</code>, <code>procedure</code>, and more — declared in a JSON schema, exposed as a client-side enum.</p>
+      </div>
+      <div class="card">
+        <h3>Bi-temporal versioning</h3>
+        <p><code>supersede</code> creates a new version instead of overwriting — history stays queryable, nothing is lost.</p>
+      </div>
+      <div class="card">
+        <h3>Doctor integrity pass</h3>
+        <p>One schema-driven check over the Markdown files for dangling links, undeclared types, and structural drift.</p>
+      </div>
+      <div class="card">
+        <h3>Web dashboard</h3>
+        <p>Force-directed graph view, hybrid search, and a CRUD panel over the same knowledge base the MCP tools use.</p>
+      </div>
+      <div class="card">
+        <h3>Three transports</h3>
+        <p>stdio, SSE, streamable-http — one agent locally, or a shared multi-agent deployment.</p>
+      </div>
+      <div class="card">
+        <h3>Markdown as source of truth</h3>
+        <p>The SQLite index is a rebuildable cache; delete it and <code>rebuild</code> — no data is ever lost.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Measured against a plain Markdown wiki</h2>
+    <p class="muted">Same knowledge base, browsed with <code>Read</code>/<code>Grep</code>/<code>Glob</code> vs. searched with Engram — 32 questions over 5,070 entries, equivalent fact coverage:</p>
+    <div class="stat-grid">
+      <div class="stat"><div class="num">-44%</div><div class="label">Tool calls</div></div>
+      <div class="stat"><div class="num">-35%</div><div class="label">Total tokens</div></div>
+      <div class="stat"><div class="num">-19%</div><div class="label">Cost</div></div>
+      <div class="stat"><div class="num">-24%</div><div class="label">Wall time</div></div>
+      <div class="stat"><div class="num">+3.7%</div><div class="label">Fact rate</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Comparison</h2>
+    <table>
+      <thead><tr><th></th><th>Engram</th><th>Mem0</th><th>Zep / Graphiti</th><th>LangMem</th></tr></thead>
+      <tbody>
+        <tr><td>Source of truth</td><td>Markdown files on disk</td><td>Vector DB / managed API</td><td>Temporal knowledge graph</td><td>Vector store (LangChain)</td></tr>
+        <tr><td>Search</td><td>BM25 + local embeddings (RRF)</td><td>Vector similarity</td><td>Graph traversal + embeddings</td><td>Vector similarity</td></tr>
+        <tr><td>Relations</td><td>Explicit <code>kb://</code> links, agent-authored</td><td>Implicit (LLM-extracted)</td><td>Auto-extracted temporal edges</td><td>None built-in</td></tr>
+        <tr><td>Deployment</td><td>Self-hosted, single Docker image</td><td>Hosted API or self-hosted + vector DB</td><td>Self-hosted, needs Neo4j</td><td>Library, no server</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Architecture</h2>
+    <div class="arch">Markdown files  --->  Search index  --->  MCP  --->  Agent
+(source of truth)     (SQLite FTS5 +      (server.py)  (Claude Code,
+                        Model2Vec,                       ChatGPT, ...)
+                        rebuildable cache)</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Quick start</h2>
+    <p class="muted">stdio — your agent manages the server. Recommended for Claude Code, ChatGPT Desktop, Cursor.</p>
+    <pre><code>claude mcp add --transport stdio engram -- \
+  docker run -i --rm -v ./knowledge:/knowledge foreigndmitryi/engram</code></pre>
+    <p class="muted">See the <a href="https://github.com/veronchenko/engram-memory#quick-start">full README</a> for SSE, streamable-http, and multi-tenant setups.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a href="https://github.com/veronchenko/engram-memory">GitHub</a>·
+      <a href="https://hub.docker.com/r/foreigndmitryi/engram">Docker Hub</a>·
+      <a href="https://github.com/veronchenko/engram-memory/blob/main/LICENSE">MIT License</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
