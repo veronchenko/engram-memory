@@ -6,7 +6,7 @@
 
 Engram is a self-hosted [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI agents persistent memory across sessions and projects. Markdown files as source of truth, hybrid keyword + semantic search, typed graph relations.
 
-**Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram)
+**Docker Hub:** [foreigndmitryi/engram](https://hub.docker.com/r/foreigndmitryi/engram) · **Website:** [veronchenko.github.io/engram-memory](https://veronchenko.github.io/engram-memory/)
 
 ## Table of Contents
 
