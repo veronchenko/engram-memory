@@ -1206,7 +1206,7 @@ function draw() {
   // Text labels (node titles + edge relation names) share one collision
   // budget: higher-priority labels claim screen space first, lower-priority
   // ones are skipped rather than drawn on top of each other. This is what
-  // keeps a dense/small graph legible instead of "стёкшимся" text.
+  // keeps a dense/small graph legible instead of smeared-together text.
   const placedRects = [];
   const tryPlace = (wx, wy, width, height) => {
     const rect = worldRectToScreen(wx, wy, width, height);
