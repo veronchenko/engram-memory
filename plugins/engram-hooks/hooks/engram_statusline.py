@@ -17,7 +17,9 @@ state (_session_state.py, written by engram_change_tracker.py,
 engram_stop_prompt.py, and engram_remember_gate.py) to show: model, git
 branch, context-window usage (percent + token count), change-counter and
 self-report progress toward their thresholds, and remembers written this
-session.
+session. engram_cost_tracker.py also writes tokens_in/tokens_out/cost_usd
+into the same state file, but this script deliberately doesn't surface
+them — cost tracking stays local-only data, not a statusline metric.
 """
 
 import json

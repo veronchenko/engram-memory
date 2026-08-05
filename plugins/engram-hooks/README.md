@@ -30,6 +30,7 @@ plugins/
     │   ├── engram_remember_gate.py
     │   ├── engram_session_start.py
     │   ├── engram_change_tracker.py
+    │   ├── engram_cost_tracker.py
     │   ├── engram_stop_prompt.py
     │   ├── engram_session_end_cleanup.py
     │   └── _hooklog.py               <- shared debug-logging helper
@@ -69,7 +70,7 @@ without the script: copy that file to `~/.codex/agents/engram-project-onboarder.
 
 - **`ENGRAM_SPEC.md`** — verbatim copy of `~/.claude/ENGRAM_SPEC.md`, the
   global instructions file that defines the "when to search"/"when to write"
-  rules the five hooks below mechanically enforce. Kept here so the hook
+  rules the six hooks below mechanically enforce. Kept here so the hook
   logic and the policy it's enforcing sit side by side for reading.
   **The live file is `~/.claude/ENGRAM_SPEC.md`** — this copy is read-only
   reference. It pulls in `@ENGRAM_TEMPLATES.md` for the entry-type table and
@@ -89,7 +90,7 @@ without the script: copy that file to `~/.codex/agents/engram-project-onboarder.
 as a Claude Code plugin agent it loads directly from here, so there's only
 one live copy.
 
-## The five hooks
+## The six hooks
 
 Defined in `hooks/hooks.json`:
 
@@ -117,6 +118,14 @@ Defined in `hooks/hooks.json`:
   weighted by diff size, not deduplicated per file. Research/web tools
   (`WebSearch`, `WebFetch`, context7) are deliberately not counted, to keep
   the signal restricted to actual code/config changes.
+- **`PostToolUse`** (`engram_cost_tracker.py`, no matcher — every tool call)
+  — accumulates `tokens_in`/`tokens_out`/`cost_usd` into the per-session
+  state whenever a PostToolUse payload carries `total_cost_usd`/
+  `usage.input_tokens`/`usage.output_tokens` (currently only Agent-tool
+  subagent calls report these; the hook is a no-op otherwise). Local-only in
+  v1 — no join with Engram's own `query_log`, no network call. Not surfaced
+  in the statusline (see below) — the data is written for later local
+  inspection, not shown live.
 - **`Stop`** (`engram_stop_prompt.py`) — hybrid of two independent triggers,
   checked in this order:
   1. **Change-counter** (mechanical): if `change_count` has reached
@@ -150,19 +159,20 @@ Defined in `hooks/hooks.json`:
   worth a workaround, since they're tiny and the OS temp dir clears
   periodically anyway.
 
-All five hooks are plain Python command scripts (`type: "command"`), not
+All six hooks are plain Python command scripts (`type: "command"`), not
 `type: "prompt"` hooks — `SessionStart` and `SessionEnd` aren't in Claude
 Code's prompt-hook-supported event list, and `Stop`/`PreToolUse`/
 `PostToolUse` need persisted state (the per-session stop counter, change
-counter, and searched flag) that a stateless prompt hook can't keep. All
-three hooks share that state through `_session_state.py`: one JSON file per
+counter, and searched flag) that a stateless prompt hook can't keep. These
+hooks share that state through `_session_state.py`: one JSON file per
 session under the system temp dir (`engram_session_<session_id>.json`,
 holding `change_count`, `stop_count`, `searched`, `remembers_count`,
-`last_remember_ts`), since each hook invocation is a fresh process with no
-memory of prior calls. Override the Stop interval with
+`last_remember_ts`, `tokens_in`, `tokens_out`, `cost_usd`), since each hook
+invocation is a fresh process with no memory of prior calls. Override the
+Stop interval with
 `ENGRAM_STOP_INTERVAL` and the change threshold with
 `ENGRAM_CHANGE_THRESHOLD`. Skip the SessionStart reminder only with
-`ENGRAM_SESSION_START_DISABLE=1` — it does not silence the other four
+`ENGRAM_SESSION_START_DISABLE=1` — it does not silence the other five
 hooks.
 
 ## Status line
@@ -172,6 +182,8 @@ Code's status bar: model, git branch, context-window usage (`used_percentage`
 plus a token count from `context_window`), and the same `change_count`/
 `stop_count`/`remembers_count` fields the hooks above maintain — e.g.
 `[Sonnet 5] | 🌿 main | 34% · 68k/200k tok | 🧠 4/15 | 📝 2/5 | 💾 2 remembers`.
+`engram_cost_tracker.py`'s `tokens_in`/`tokens_out`/`cost_usd` fields are
+written to the same state file but deliberately not shown here.
 
 Plugin `settings.json` only supports the `agent` and `subagentStatusLine`
 keys, not the main `statusLine` — a plugin cannot auto-register it — so wire

@@ -4,7 +4,8 @@ Replaces the earlier one-counter-per-file scheme (engram_change_count_*.txt,
 engram_stop_count_*.txt, engram_searched_*.txt) with a single JSON file per
 session under the system temp dir, so a hook that needs more than one field
 (the statusline script wants remembers_count and last_remember_ts alongside
-the existing counters) doesn't need yet another file.
+the existing counters, engram_cost_tracker.py wants tokens_in/tokens_out/
+cost_usd) doesn't need yet another file.
 
 Each hook invocation is a fresh process with no memory of prior calls, so
 load()/save() always round-trip through disk. Callers own their own
@@ -24,6 +25,9 @@ DEFAULTS = {
     "searched": False,
     "remembers_count": 0,
     "last_remember_ts": None,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "cost_usd": 0.0,
 }
 
 

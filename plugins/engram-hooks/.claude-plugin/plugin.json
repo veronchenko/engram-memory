@@ -1,6 +1,6 @@
 {
   "name": "engram-hooks",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Nudges Claude Code / Codex to actually use the Engram MCP memory server — search before starting work, and remember non-trivial changes before finishing.",
   "author": {
     "name": "veronchenko"
