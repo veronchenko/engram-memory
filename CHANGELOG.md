@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0
+
+- feat: usage-analytics `query_log` — every `search`/`recall`/`remember` call is now recorded (session id, tool, query text, returned/top result ids, hit, latency) in a new SQLite table, separate from the existing `ENGRAM_QUERY_LOG` JSONL trace. A new `GET /api/analytics` endpoint and dashboard panel surface read/write ratio, hit rate, zero-hit queries (verbatim), click-through rate, searches-per-recall, average recall rank, hit distribution by entry type, dead entries, and sessions touching Engram
+- feat: client-side cost/token tracking — `engram_cost_tracker.py`, a new `PostToolUse` hook in the `engram-hooks` plugin, accumulates `total_cost_usd`/`usage.input_tokens`/`usage.output_tokens` per session (local-only, not joined against `query_log`, not shown in the statusline)
+- chore: migrated the MCP server from `mcp.server.fastmcp` to the standalone `fastmcp` package — the installed `mcp` SDK's `Context` has no `session_id`, needed for the analytics work above; bumps `fastapi`/`uvicorn` to versions compatible with `fastmcp`'s `starlette` requirement
+
 ## 0.12.1
 
 - fix: `search`'s `entry_type` filter is validated against the schema enum (was a plain `str`, so an unknown/misspelled type silently matched nothing instead of being rejected client-side, unlike `remember`)
