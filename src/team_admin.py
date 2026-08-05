@@ -18,7 +18,7 @@ import re
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Team folder names double as SQLite/filesystem path components.
@@ -97,25 +97,20 @@ class TeamAdminStore:
         """
 
         if not _NAME_RE.match(name):
-            raise InvalidTeamNameError(
-                f"Invalid team name {name!r}: must match {_NAME_RE.pattern}"
-            )
+            raise InvalidTeamNameError(f"Invalid team name {name!r}: must match {_NAME_RE.pattern}")
 
         api_key = secrets.token_urlsafe(_KEY_BYTES)
         key_hash = _hash_key(api_key)
-        created_at = datetime.now(timezone.utc).isoformat()
+        created_at = datetime.now(UTC).isoformat()
 
         try:
             with self._connect() as conn:
                 conn.execute(
-                    "INSERT INTO teams (name, folder, key_hash, created_at) "
-                    "VALUES (?, ?, ?, ?)",
+                    "INSERT INTO teams (name, folder, key_hash, created_at) VALUES (?, ?, ?, ?)",
                     (name, name, key_hash, created_at),
                 )
         except sqlite3.IntegrityError as exc:
-            raise TeamAlreadyExistsError(
-                f"Team {name!r} already exists"
-            ) from exc
+            raise TeamAlreadyExistsError(f"Team {name!r} already exists") from exc
 
         return Team(name=name, folder=name, created_at=created_at, revoked_at=None), api_key
 
@@ -146,18 +141,15 @@ class TeamAdminStore:
             revoked), False if no team with this name is registered.
         """
 
-        revoked_at = datetime.now(timezone.utc).isoformat()
+        revoked_at = datetime.now(UTC).isoformat()
         with self._connect() as conn:
             cur = conn.execute(
-                "UPDATE teams SET revoked_at = ? "
-                "WHERE name = ? AND revoked_at IS NULL",
+                "UPDATE teams SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL",
                 (revoked_at, name),
             )
             if cur.rowcount:
                 return True
-            exists = conn.execute(
-                "SELECT 1 FROM teams WHERE name = ?", (name,)
-            ).fetchone()
+            exists = conn.execute("SELECT 1 FROM teams WHERE name = ?", (name,)).fetchone()
             return exists is not None
 
     def verify_key(self, api_key: str) -> str | None:

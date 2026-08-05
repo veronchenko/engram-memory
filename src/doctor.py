@@ -18,8 +18,8 @@ import logging
 import re
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import datetime, timezone
-from typing import Any, Final
+from datetime import UTC, datetime
+from typing import Any, Final, cast
 
 from schema import Schema, TypeRule
 from search_backend import extract_relations
@@ -68,9 +68,7 @@ def _body_field_pattern(label: str) -> re.Pattern[str]:
     """
 
     # Anchored at line start, colon required after the label
-    return re.compile(
-        rf"^\*\*\s*{re.escape(label)}\s*:", re.MULTILINE | re.IGNORECASE
-    )
+    return re.compile(rf"^\*\*\s*{re.escape(label)}\s*:", re.MULTILINE | re.IGNORECASE)
 
 
 def missing_required_fields(entry: dict[str, Any], rule: TypeRule) -> list[str]:
@@ -87,9 +85,7 @@ def missing_required_fields(entry: dict[str, Any], rule: TypeRule) -> list[str]:
 
     # Empty string and absent are equivalent here
     return [
-        field_name
-        for field_name in rule.required
-        if not str(entry.get(field_name, "")).strip()
+        field_name for field_name in rule.required if not str(entry.get(field_name, "")).strip()
     ]
 
 
@@ -107,9 +103,7 @@ def missing_body_fields(entry: dict[str, Any], rule: TypeRule) -> list[str]:
 
     content = entry.get("content", "")
     # Labels with no matching bold header line
-    return [
-        label for label in rule.body if not _body_field_pattern(label).search(content)
-    ]
+    return [label for label in rule.body if not _body_field_pattern(label).search(content)]
 
 
 def _days_since(iso_ts: str, now: datetime) -> float | None:
@@ -131,7 +125,7 @@ def _days_since(iso_ts: str, now: datetime) -> float | None:
     except (ValueError, TypeError):
         return None
     if at.tzinfo is None:
-        at = at.replace(tzinfo=timezone.utc)
+        at = at.replace(tzinfo=UTC)
     return max((now - at).total_seconds(), 0.0) / 86400
 
 
@@ -258,7 +252,7 @@ def run_doctor(
 
     found: dict[str, set[str]] = {kind: set() for kind in CHECK_KINDS}
     degree: defaultdict[str, int] = defaultdict(int)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for entry in entry_list:
         entry_id = entry["id"]
@@ -301,16 +295,13 @@ def run_doctor(
             target = by_id.get(target_id)
             if target is None:
                 found["part_of_dangling"].add(entry_id)
-            elif (
-                str(target.get("type", "")) not in membership_targets
-                or target.get("superseded_by", "")
+            elif str(target.get("type", "")) not in membership_targets or target.get(
+                "superseded_by", ""
             ):
                 # Wrong-typed target, or a hub replaced by a newer version
                 found["part_of_target_not_membership"].add(entry_id)
 
-        for relation in extract_relations(
-            entry.get("content", ""), schema.edge_types
-        ):
+        for relation in extract_relations(entry.get("content", ""), schema.edge_types):
             target_id = relation["target"]
             degree[entry_id] += 1
 
@@ -340,10 +331,8 @@ def run_doctor(
         for kind, ids in found.items()
     }
 
-    total = sum(int(check["count"]) for check in checks.values())
-    logger.info(
-        "Doctor scanned %d entries, found %d affected entries", len(entry_list), total
-    )
+    total = sum(cast(int, check["count"]) for check in checks.values())
+    logger.info("Doctor scanned %d entries, found %d affected entries", len(entry_list), total)
 
     return {
         "entries_scanned": len(entry_list),

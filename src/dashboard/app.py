@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -78,7 +79,7 @@ def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
             )
 
     @app.get("/api/graph")
-    def get_graph(request: Request, include_superseded: bool = False) -> dict:
+    def get_graph(request: Request, include_superseded: bool = False) -> dict[str, Any]:
         return kb_resolver(request).get_graph(include_superseded=include_superseded)
 
     @app.get("/api/search")
@@ -89,7 +90,7 @@ def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
         limit: int = 20,
         include_superseded: bool = False,
         entry_type: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         results = kb_resolver(request).search(
             q,
             tags=tags,
@@ -105,21 +106,21 @@ def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
         tags: list[str] | None = None,
         limit: int = 500,
         include_superseded: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         entries = kb_resolver(request).list_entries(
             tags=tags, limit=limit, include_superseded=include_superseded
         )
         return {"count": len(entries), "entries": entries}
 
     @app.get("/api/entries/{entry_id}")
-    def get_entry(request: Request, entry_id: str) -> dict:
+    def get_entry(request: Request, entry_id: str) -> dict[str, Any]:
         entry = kb_resolver(request).get(entry_id, with_relations=True)
         if not entry:
             raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
         return entry
 
     @app.post("/api/entries")
-    def create_entry(request: Request, body: EntryIn) -> dict:
+    def create_entry(request: Request, body: EntryIn) -> dict[str, Any]:
         kb = kb_resolver(request)
         _check_type(kb, body.entry_type)
         result = kb.remember(
@@ -134,7 +135,7 @@ def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
         return result
 
     @app.patch("/api/entries/{entry_id}")
-    def update_entry(request: Request, entry_id: str, body: EntryIn) -> dict:
+    def update_entry(request: Request, entry_id: str, body: EntryIn) -> dict[str, Any]:
         kb = kb_resolver(request)
         _check_type(kb, body.entry_type)
         result = kb.remember(
@@ -151,23 +152,23 @@ def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
         return result
 
     @app.delete("/api/entries/{entry_id}")
-    def delete_entry(request: Request, entry_id: str) -> dict:
+    def delete_entry(request: Request, entry_id: str) -> dict[str, Any]:
         success = kb_resolver(request).delete(entry_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
         return {"success": True, "id": entry_id}
 
     @app.get("/api/tags")
-    def get_tags(request: Request) -> dict:
+    def get_tags(request: Request) -> dict[str, Any]:
         tag_list = kb_resolver(request).list_tags()
         return {"count": len(tag_list), "tags": tag_list}
 
     @app.get("/api/analytics")
-    def get_analytics(request: Request) -> dict:
+    def get_analytics(request: Request) -> dict[str, Any]:
         return kb_resolver(request).get_analytics_snapshot()
 
     @app.get("/")
-    def index(request: Request):
+    def index(request: Request) -> Response:
         try:
             kb_resolver(request)
         except HTTPException as exc:

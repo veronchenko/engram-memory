@@ -16,10 +16,10 @@ import uvicorn
 from config import DashboardSettings, parse_dashboard_args
 from database import KnowledgeBase
 from port_utils import find_free_port
-
-from .app import create_app
 from schema import load_schema
 from search_backend import SQLiteBackend
+
+from .app import create_app
 
 
 def parse_args() -> DashboardSettings:
@@ -56,9 +56,7 @@ def main() -> None:
 
     port = find_free_port(args.host, args.port)
     if port != args.port:
-        logger.info(
-            "Port %d in use, using free port %d instead", args.port, port
-        )
+        logger.info("Port %d in use, using free port %d instead", args.port, port)
 
     logger.info("Starting Engram dashboard on %s:%d", args.host, port)
     uvicorn.run(app, host=args.host, port=port, log_level="info")

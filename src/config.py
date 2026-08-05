@@ -13,12 +13,17 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
+from typing import overload
 
 # ---------------------------------------------------------------------------
 # Env var resolution
 # ---------------------------------------------------------------------------
 
 
+@overload
+def env(name: str, default: str) -> str: ...
+@overload
+def env(name: str, default: None = None) -> str | None: ...
 def env(name: str, default: str | None = None) -> str | None:
     """Read an ENGRAM_* environment variable with a default."""
     return os.environ.get(f"ENGRAM_{name}", default)
@@ -374,10 +379,7 @@ def parse_admin_api_args(argv: list[str] | None = None) -> AdminApiSettings:
         "--port",
         type=int,
         default=int(env("ADMIN_API_PORT", str(ADMIN_API_DEFAULT_PORT))),
-        help=(
-            "Listen port (env: ENGRAM_ADMIN_API_PORT, default: "
-            f"{ADMIN_API_DEFAULT_PORT})"
-        ),
+        help=(f"Listen port (env: ENGRAM_ADMIN_API_PORT, default: {ADMIN_API_DEFAULT_PORT})"),
     )
     parser.add_argument(
         "--api-key",

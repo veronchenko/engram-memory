@@ -21,8 +21,9 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, Literal, cast
 
 import uvicorn
 from fastmcp import Context, FastMCP
@@ -43,6 +44,7 @@ from team_admin import TeamAdminStore
 # tool, and the placeholder value is never the one a client sees.
 EntryType: type[enum.Enum] = build_entry_type_enum(("unregistered",))
 
+
 def log_query(tool: str, **fields: object) -> None:
     """
     Append a retrieval event to the JSONL query log, if enabled.
@@ -62,7 +64,7 @@ def log_query(tool: str, **fields: object) -> None:
         return
 
     record: dict[str, object] = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "tool": tool,
         **fields,
     }
@@ -149,9 +151,9 @@ def register_tools(
         tags: list[str] | None = None,
         limit: int = 10,
         include_superseded: bool = False,
-        entry_type: EntryType | None = None,
+        entry_type: EntryType | None = None,  # type: ignore[valid-type]
         part_of: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Search entries by keyword + semantic similarity.
 
@@ -216,7 +218,7 @@ def register_tools(
             returned_ids=returned_ids,
         )
         kb.log_query_event(
-            ts=datetime.now(timezone.utc).isoformat(),
+            ts=datetime.now(UTC).isoformat(),
             session_id=ctx.session_id,
             tool="search",
             query_text=query,
@@ -232,7 +234,7 @@ def register_tools(
     @mcp.tool()
     def recall(
         entry_id: str, ctx: Context, relations_limit: int = 20, hops: int = 1
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Read a full entry by id, with its graph relations.
 
@@ -267,7 +269,9 @@ def register_tools(
 
         logger.info(
             "recall: id=%s, relations_limit=%d, hops=%d",
-            entry_id, relations_limit, hops,
+            entry_id,
+            relations_limit,
+            hops,
         )
 
         start = time.perf_counter()
@@ -282,7 +286,7 @@ def register_tools(
         latency_ms = int((time.perf_counter() - start) * 1000)
         log_query("recall", entry_id=entry_id, found=entry is not None)
         kb.log_query_event(
-            ts=datetime.now(timezone.utc).isoformat(),
+            ts=datetime.now(UTC).isoformat(),
             session_id=ctx.session_id,
             tool="recall",
             entry_id=entry_id,
@@ -298,9 +302,7 @@ def register_tools(
         entry_file = kb.entry_path(entry_id)
         if entry_file and entry_file.exists():
             mtime = entry_file.stat().st_mtime
-            entry["last_modified"] = datetime.fromtimestamp(
-                mtime, tz=timezone.utc
-            ).strftime("%Y-%m-%d")
+            entry["last_modified"] = datetime.fromtimestamp(mtime, tz=UTC).strftime("%Y-%m-%d")
 
         return entry
 
@@ -309,14 +311,14 @@ def register_tools(
         title: str,
         content: str,
         tags: list[str],
-        entry_type: EntryType,
+        entry_type: EntryType,  # type: ignore[valid-type]
         ctx: Context,
         entry_id: str | None = None,
         force: bool = False,
         resource: str | None = None,
         supersede: bool = False,
         part_of: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Create or update an entry (upsert).
 
@@ -348,7 +350,7 @@ def register_tools(
 
         kb = kb_provider()
         # Store the plain string, not the enum member
-        type_name = entry_type.value
+        type_name = entry_type.value  # type: ignore[attr-defined]
 
         logger.info(
             "remember: title='%s', type=%s, tags=%s, entry_id=%s, force=%s, "
@@ -376,7 +378,7 @@ def register_tools(
         )
         latency_ms = int((time.perf_counter() - start) * 1000)
         kb.log_query_event(
-            ts=datetime.now(timezone.utc).isoformat(),
+            ts=datetime.now(UTC).isoformat(),
             session_id=ctx.session_id,
             tool="remember",
             entry_type=type_name,
@@ -401,9 +403,7 @@ def register_tools(
                     "articles linked with kb:// references."
                 )
 
-            paragraphs = [
-                p for p in content.split("\n\n") if p.strip()
-            ]
+            paragraphs = [p for p in content.split("\n\n") if p.strip()]
             if len(paragraphs) > 3:
                 warnings.append(
                     f"Article has {len(paragraphs)} paragraphs — "
@@ -417,9 +417,7 @@ def register_tools(
                     "An atomic article should be much shorter."
                 )
             elif content_size > 512:
-                warnings.append(
-                    f"Article is {content_size} bytes — exceeds 512 B target."
-                )
+                warnings.append(f"Article is {content_size} bytes — exceeds 512 B target.")
 
             if warnings:
                 result["warnings"] = warnings
@@ -427,7 +425,7 @@ def register_tools(
         return result
 
     @mcp.tool()
-    def forget(entry_id: str) -> dict:
+    def forget(entry_id: str) -> dict[str, Any]:
         """
         Delete a knowledge base entry.
 
@@ -464,7 +462,7 @@ def register_tools(
         include_superseded: bool = False,
         entry_type: str | None = None,
         part_of: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         List knowledge base entries, sorted by title.
 
@@ -503,7 +501,7 @@ def register_tools(
         return {"count": len(entries), "entries": entries}
 
     @mcp.tool()
-    def tags() -> dict:
+    def tags() -> dict[str, Any]:
         """
         List all tags in the knowledge base, most used first.
         """
@@ -516,7 +514,7 @@ def register_tools(
         return {"count": len(tag_list), "tags": tag_list}
 
     @mcp.tool()
-    def rebuild() -> dict:
+    def rebuild() -> dict[str, Any]:
         """
         Rebuild the search index from the stored entries.
 
@@ -536,12 +534,10 @@ def register_tools(
         result = kb.rebuild()
         count = result["count"]
 
-        response: dict = {"success": True, "entries_indexed": count}
+        response: dict[str, Any] = {"success": True, "entries_indexed": count}
 
         checks = result["report"]["checks"]
-        flagged = {
-            kind: check["count"] for kind, check in checks.items() if check["count"]
-        }
+        flagged = {kind: check["count"] for kind, check in checks.items() if check["count"]}
         if flagged:
             response["schema_warnings"] = flagged
 
@@ -549,7 +545,7 @@ def register_tools(
         return response
 
     @mcp.tool()
-    def doctor() -> dict:
+    def doctor() -> dict[str, Any]:
         """
         Report knowledge base entries that need fixing.
 
@@ -568,9 +564,7 @@ def register_tools(
 
         report = kb.doctor()
 
-        logger.info(
-            "doctor: scanned %d entries", report["entries_scanned"]
-        )
+        logger.info("doctor: scanned %d entries", report["entries_scanned"])
         return report
 
 
@@ -591,9 +585,7 @@ class TeamRegistry:
     the database on every request), so the cache never needs eviction.
     """
 
-    def __init__(
-        self, teams_root: Path, schema: Schema, embedding_model: str
-    ) -> None:
+    def __init__(self, teams_root: Path, schema: Schema, embedding_model: str) -> None:
         self._teams_root = teams_root
         self._schema = schema
         self._embedding_model = embedding_model
@@ -612,9 +604,7 @@ class TeamRegistry:
             if kb is None:
                 team_path = self._teams_root / folder
                 index_path = team_path / "index" / "engram.db"
-                backend = SQLiteBackend(
-                    index_path, embedding_model=self._embedding_model
-                )
+                backend = SQLiteBackend(index_path, embedding_model=self._embedding_model)
                 backend.warm_up()
                 kb = KnowledgeBase(str(team_path), backend=backend, schema=self._schema)
                 self._cache[folder] = kb
@@ -685,19 +675,21 @@ def main() -> None:
     if args.transport != "stdio":
         port = find_free_port(args.host, args.port)
         if port != args.port:
-            logger.info(
-                "Port %d in use, using free port %d instead", args.port, port
-            )
+            logger.info("Port %d in use, using free port %d instead", args.port, port)
 
     mcp = FastMCP(name="Engram")
 
     register_tools(mcp, kb, logger, schema)
 
     logger.info("Starting Engram (%s transport)", args.transport)
-    if args.transport == "stdio":
-        mcp.run(transport=args.transport)
+    # --transport is argparse-restricted to this Literal's members (see
+    # config.parse_server_args's choices=); ServerSettings itself keeps
+    # the broader `str` since it's resolved from a CLI/env string.
+    transport = cast(Literal["stdio", "sse", "streamable-http"], args.transport)
+    if transport == "stdio":
+        mcp.run(transport=transport)
     else:
-        mcp.run(transport=args.transport, host=args.host, port=port)
+        mcp.run(transport=transport, host=args.host, port=port)
 
 
 def _run_multi_tenant(args: ServerSettings, logger: logging.Logger) -> None:

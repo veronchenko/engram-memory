@@ -37,9 +37,7 @@ PACKAGED_SCHEMA_PATH: Final[Path] = Path(__file__).parent / SCHEMA_FILENAME
 
 # How a type expresses project membership. Parsed and carried today;
 # enforcement lands with the `part_of` frontmatter field.
-MEMBERSHIP_VALUES: Final[frozenset[str]] = frozenset(
-    {"required", "optional", "none"}
-)
+MEMBERSHIP_VALUES: Final[frozenset[str]] = frozenset({"required", "optional", "none"})
 
 # Fallback when a schema omits `limits.max_degree`
 DEFAULT_MAX_DEGREE: Final[int] = 15
@@ -148,9 +146,7 @@ class Schema:
         """
 
         return frozenset(
-            name
-            for name, rule in self.types.items()
-            if getattr(rule, attribute) == value
+            name for name, rule in self.types.items() if getattr(rule, attribute) == value
         )
 
 
@@ -263,9 +259,7 @@ def parse_schema(raw: Any, source: Path | None = None) -> Schema:
 
     return Schema(
         version=version,
-        types={
-            name: _parse_type_rule(name, rule) for name, rule in raw_types.items()
-        },
+        types={name: _parse_type_rule(name, rule) for name, rule in raw_types.items()},
         edges=edges,
         max_degree=max_degree,
         source=source,

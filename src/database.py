@@ -14,7 +14,7 @@ import logging
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -355,9 +355,7 @@ class KnowledgeBase:
     # CRUD operations (file + backend)
     # -----------------------------------------------------------------------
 
-    def _suggest_links(
-        self, entry_id: str, title: str, content: str
-    ) -> list[dict[str, Any]]:
+    def _suggest_links(self, entry_id: str, title: str, content: str) -> list[dict[str, Any]]:
         """
         Suggest kb:// links to existing entries similar to this one.
 
@@ -383,9 +381,7 @@ class KnowledgeBase:
             return []
 
         already_linked = {rel["target"] for rel in extract_relations(content)}
-        candidates = self._backend.find_similar_by_embedding(
-            embedding, exclude_id=entry_id
-        )
+        candidates = self._backend.find_similar_by_embedding(embedding, exclude_id=entry_id)
 
         return [
             {
@@ -397,9 +393,7 @@ class KnowledgeBase:
             if candidate["id"] not in already_linked
         ]
 
-    def _check_write_gate(
-        self, title: str, content: str
-    ) -> dict[str, Any] | None:
+    def _check_write_gate(self, title: str, content: str) -> dict[str, Any] | None:
         """
         Find a live near-duplicate of a would-be new entry.
 
@@ -543,7 +537,7 @@ class KnowledgeBase:
 
         old_id = old_entry["id"]
         new_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         old_entry["superseded_by"] = new_id
         self._write_entry(old_entry)
@@ -557,9 +551,7 @@ class KnowledgeBase:
             superseded_by=new_id,
         )
 
-        new_part_of = (
-            old_entry.get("part_of", []) if part_of is None else part_of
-        )
+        new_part_of = old_entry.get("part_of", []) if part_of is None else part_of
         new_entry = {
             "id": new_id,
             "title": title,
@@ -576,7 +568,7 @@ class KnowledgeBase:
         self._update_meta_cache(new_id, title, tags, entry_type, part_of=new_part_of)
 
         logger.info("Entry %s superseded by %s: %s", old_id, new_id, title)
-        response = {
+        response: dict[str, Any] = {
             "id": new_id,
             "title": title,
             "action": "superseded",
@@ -687,17 +679,20 @@ class KnowledgeBase:
             if part_of is not None:
                 existing["part_of"] = part_of
             if not existing.get("valid_at"):
-                existing["valid_at"] = datetime.now(timezone.utc).isoformat()
+                existing["valid_at"] = datetime.now(UTC).isoformat()
 
             self._write_entry(existing)
             self._index_entry(existing)
             self._update_meta_cache(
-                entry_id, title, tags, entry_type,
+                entry_id,
+                title,
+                tags,
+                entry_type,
                 part_of=existing.get("part_of", []),
             )
 
             logger.info("Updated entry %s: %s", entry_id, title)
-            response = {"id": entry_id, "title": title, "action": "updated"}
+            response: dict[str, Any] = {"id": entry_id, "title": title, "action": "updated"}
             suggestions = self._suggest_links(entry_id, title, content)
             if suggestions:
                 response["suggested_links"] = suggestions
@@ -718,8 +713,7 @@ class KnowledgeBase:
                     if supersede:
                         # New version, old entry preserved as history
                         return self._supersede(
-                            best_entry, title, content, tags, entry_type,
-                            resource, part_of
+                            best_entry, title, content, tags, entry_type, resource, part_of
                         )
 
                     best_entry["title"] = title
@@ -731,12 +725,15 @@ class KnowledgeBase:
                     if part_of is not None:
                         best_entry["part_of"] = part_of
                     if not best_entry.get("valid_at"):
-                        best_entry["valid_at"] = datetime.now(timezone.utc).isoformat()
+                        best_entry["valid_at"] = datetime.now(UTC).isoformat()
 
                     self._write_entry(best_entry)
                     self._index_entry(best_entry)
                     self._update_meta_cache(
-                        best["id"], title, tags, entry_type,
+                        best["id"],
+                        title,
+                        tags,
+                        entry_type,
                         part_of=best_entry.get("part_of", []),
                     )
 
@@ -756,9 +753,7 @@ class KnowledgeBase:
                     suggestions = self._suggest_links(best["id"], title, content)
                     if suggestions:
                         response["suggested_links"] = suggestions
-                    target_warnings = self._part_of_warnings(
-                        best_entry.get("part_of", [])
-                    )
+                    target_warnings = self._part_of_warnings(best_entry.get("part_of", []))
                     if target_warnings:
                         response["warnings"] = target_warnings
 
@@ -771,9 +766,7 @@ class KnowledgeBase:
         # an entry that is structurally invalid anyway.
         rule = self._schema.rule(entry_type)
         if rule is not None and rule.membership == "required" and not part_of:
-            logger.warning(
-                "Remember rejected — type '%s' requires part_of", entry_type
-            )
+            logger.warning("Remember rejected — type '%s' requires part_of", entry_type)
             return {
                 "error": (
                     f"entry_type '{entry_type}' requires part_of: pass the "
@@ -815,15 +808,13 @@ class KnowledgeBase:
             "type": entry_type,
             "resource": resource or "",
             "part_of": part_of or [],
-            "valid_at": datetime.now(timezone.utc).isoformat(),
+            "valid_at": datetime.now(UTC).isoformat(),
             "content": content,
         }
 
         self._write_entry(entry)
         self._index_entry(entry)
-        self._update_meta_cache(
-            entry_id, title, tags, entry_type, part_of=part_of or []
-        )
+        self._update_meta_cache(entry_id, title, tags, entry_type, part_of=part_of or [])
 
         logger.info("Created new entry %s: %s", entry_id, title)
         response = {"id": entry_id, "title": title, "action": "created"}
@@ -891,14 +882,10 @@ class KnowledgeBase:
         if with_relations:
             rule = self._schema.rule(entry.get("type", ""))
             if digest and rule is not None and rule.digest_on_recall:
-                relations = self.digest_relations(
-                    entry_id, out_limit=relations_limit, hops=hops
-                )
+                relations = self.digest_relations(entry_id, out_limit=relations_limit, hops=hops)
                 truncated = len(relations["out"]) < relations["out_total"]
             else:
-                relations = self.get_relations(
-                    entry_id, limit=relations_limit, hops=hops
-                )
+                relations = self.get_relations(entry_id, limit=relations_limit, hops=hops)
                 truncated = (
                     len(relations["out"]) < relations["out_total"]
                     or len(relations["in"]) < relations["in_total"]
@@ -1073,7 +1060,7 @@ class KnowledgeBase:
         cached = self._meta_cache.get(entry_id)
         if cached:
             # Title from cache
-            return cached["title"]
+            return str(cached["title"])
 
         # Fallback to disk (entry may not be cached yet)
         filepath = self._entries_path / f"{entry_id}.md"
@@ -1084,7 +1071,7 @@ class KnowledgeBase:
         if not entry:
             return "(unknown)"
 
-        return entry["title"]
+        return str(entry["title"])
 
     def entry_path(self, entry_id: str) -> Path | None:
         """
@@ -1290,9 +1277,7 @@ class KnowledgeBase:
         # Integrity check (non-blocking, informational only). Usage
         # counters survive rebuild, so the snapshot read after
         # backend.rebuild() above reflects carried-over access history.
-        report = run_doctor(
-            entries, self._schema, usage=self._backend.get_usage_snapshot()
-        )
+        report = run_doctor(entries, self._schema, usage=self._backend.get_usage_snapshot())
 
         logger.info("Rebuild complete: %d entries indexed", count)
         return {"count": count, "report": report}
@@ -1317,9 +1302,7 @@ class KnowledgeBase:
         similar = []
 
         for entry_id, meta in self._meta_cache.items():
-            ratio = SequenceMatcher(
-                None, normalized_title, meta["title"].lower().strip()
-            ).ratio()
+            ratio = SequenceMatcher(None, normalized_title, meta["title"].lower().strip()).ratio()
 
             if ratio >= DUPLICATE_THRESHOLD:
                 similar.append(
@@ -1380,9 +1363,7 @@ class KnowledgeBase:
             if entry_type and meta.get("type", "") != entry_type:
                 continue
 
-            if filter_part_of and not filter_part_of.issubset(
-                set(meta.get("part_of", []))
-            ):
+            if filter_part_of and not filter_part_of.issubset(set(meta.get("part_of", []))):
                 continue
 
             # Hide superseded entries by default
@@ -1420,7 +1401,9 @@ class KnowledgeBase:
             for tag in meta["tags"]:
                 tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
-        result = [{"tag": tag, "count": count} for tag, count in tag_counts.items()]
+        result: list[dict[str, Any]] = [
+            {"tag": tag, "count": count} for tag, count in tag_counts.items()
+        ]
         result.sort(key=lambda x: (-x["count"], x["tag"]))
 
         return result
@@ -1552,10 +1535,6 @@ def _normalize_part_of(part_of: Any) -> list[str]:
     if not isinstance(part_of, list):
         return []
 
-    cleaned = {
-        str(target).lower().strip()
-        for target in part_of
-        if str(target).strip()
-    }
+    cleaned = {str(target).lower().strip() for target in part_of if str(target).strip()}
 
     return sorted(cleaned)

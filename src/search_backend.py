@@ -9,6 +9,7 @@ using Reciprocal Rank Fusion. The database is a rebuildable cache on disk.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -16,9 +17,9 @@ import math
 import os
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from model2vec import StaticModel
@@ -36,8 +37,6 @@ from config import (
     STALENESS_HALF_LIFE_DAYS,
     SUGGESTION_MIN_SIMILARITY,
     SUGGESTION_TOP_K,
-    WRITE_GATE_CANDIDATES,
-    WRITE_GATE_MIN_SIMILARITY,
     ZERO_HIT_QUERIES_LIMIT,
 )
 from schema import DEFAULT_EDGE, DEFAULT_EDGES
@@ -71,6 +70,7 @@ def _get_model(model_name: str) -> StaticModel | None:
 
     _model_cache[model_name] = model
     return model
+
 
 # Regex for extracting kb:// links: kb://uuid, kb://uuid#type, or
 # kb://uuid#type:edge — the fragment names the target entry's type, the
@@ -373,7 +373,7 @@ class SQLiteBackend:
             return None
 
         vector = model.encode([text])[0].astype(np.float32)
-        return vector.tobytes()
+        return cast(bytes, vector.tobytes())
 
     # -------------------------------------------------------------------
     # Internal database access
@@ -406,25 +406,17 @@ class SQLiteBackend:
             conn.execute(_SQL_CREATE_ENTRIES)
 
             # Migrate pre-existing databases that predate the embedding column
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):
                 conn.execute("ALTER TABLE entries ADD COLUMN embedding BLOB")
-            except sqlite3.OperationalError:
-                pass
 
             # Migrate pre-existing databases that predate the content column
             # (needed for entries_fts to work as an external-content table)
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):
                 conn.execute("ALTER TABLE entries ADD COLUMN content TEXT DEFAULT ''")
-            except sqlite3.OperationalError:
-                pass
 
             # Migrate pre-existing databases that predate the embedding cache
-            try:
-                conn.execute(
-                    "ALTER TABLE entries ADD COLUMN content_hash TEXT DEFAULT ''"
-                )
-            except sqlite3.OperationalError:
-                pass
+            with contextlib.suppress(sqlite3.OperationalError):
+                conn.execute("ALTER TABLE entries ADD COLUMN content_hash TEXT DEFAULT ''")
 
             # Migrate pre-existing databases that predate usage tracking
             # and structural membership
@@ -433,10 +425,8 @@ class SQLiteBackend:
                 "ALTER TABLE entries ADD COLUMN last_accessed TEXT DEFAULT ''",
                 "ALTER TABLE entries ADD COLUMN part_of TEXT DEFAULT '[]'",
             ):
-                try:
+                with contextlib.suppress(sqlite3.OperationalError):
                     conn.execute(ddl)
-                except sqlite3.OperationalError:
-                    pass
 
             # Migrate a legacy contentless entries_fts (content='') to the
             # external-content form — its module arguments can't be ALTERed,
@@ -463,9 +453,7 @@ class SQLiteBackend:
             legacy_relations = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='relations'"
             ).fetchone()
-            if legacy_relations is not None and "edge_type" not in (
-                legacy_relations[0] or ""
-            ):
+            if legacy_relations is not None and "edge_type" not in (legacy_relations[0] or ""):
                 conn.execute("DROP TABLE relations")
                 logger.warning(
                     "Migrated relations table to typed edges — "
@@ -532,10 +520,7 @@ class SQLiteBackend:
                 "WHERE id = ? AND content_hash = ? AND embedding IS NOT NULL",
                 (entry_id, content_hash),
             ).fetchone()
-            if cached is not None:
-                embedding = cached[0]
-            else:
-                embedding = self._embed_text(f"{title}\n{content}")
+            embedding = cached[0] if cached is not None else self._embed_text(f"{title}\n{content}")
 
         # Remove any existing FTS row BEFORE overwriting the entries row.
         # entries_fts is an external-content table (reads `entries` back by
@@ -634,9 +619,7 @@ class SQLiteBackend:
             # Delete the FTS row first, while `entries` still has the row at
             # its current rowid — external-content FTS5 reads `entries` back
             # by rowid to know what to remove from the index.
-            old_row = conn.execute(
-                "SELECT rowid FROM entries WHERE id = ?", (entry_id,)
-            ).fetchone()
+            old_row = conn.execute("SELECT rowid FROM entries WHERE id = ?", (entry_id,)).fetchone()
             if old_row is not None:
                 conn.execute("DELETE FROM entries_fts WHERE rowid = ?", (old_row[0],))
 
@@ -654,9 +637,7 @@ class SQLiteBackend:
         logger.info("Unindexed entry %s", entry_id)
 
     @staticmethod
-    def _tag_filter_clause(
-        tags: list[str] | None, alias: str = "e"
-    ) -> tuple[str, list[str]]:
+    def _tag_filter_clause(tags: list[str] | None, alias: str = "e") -> tuple[str, list[str]]:
         """
         Build a SQL AND-clause requiring each tag to be present in tags JSON.
 
@@ -675,9 +656,7 @@ class SQLiteBackend:
         conditions = []
         params: list[str] = []
         for tag in tags:
-            conditions.append(
-                f"EXISTS (SELECT 1 FROM json_each({alias}.tags) WHERE value = ?)"
-            )
+            conditions.append(f"EXISTS (SELECT 1 FROM json_each({alias}.tags) WHERE value = ?)")
             params.append(tag)
 
         return "AND " + " AND ".join(conditions), params
@@ -704,17 +683,13 @@ class SQLiteBackend:
         conditions = []
         params: list[str] = []
         for target in part_of:
-            conditions.append(
-                f"EXISTS (SELECT 1 FROM json_each({alias}.part_of) WHERE value = ?)"
-            )
+            conditions.append(f"EXISTS (SELECT 1 FROM json_each({alias}.part_of) WHERE value = ?)")
             params.append(target)
 
         return "AND " + " AND ".join(conditions), params
 
     @staticmethod
-    def _type_filter_clause(
-        entry_type: str | None, alias: str = "e"
-    ) -> tuple[str, list[str]]:
+    def _type_filter_clause(entry_type: str | None, alias: str = "e") -> tuple[str, list[str]]:
         """
         Build a SQL AND-clause requiring an exact match on entry type.
 
@@ -781,18 +756,14 @@ class SQLiteBackend:
         filter_params = [*tag_params, *type_params, *part_of_params]
 
         try:
-            cursor = conn.execute(
-                sql, [" ".join(quoted), *filter_params, limit]
-            )
+            cursor = conn.execute(sql, [" ".join(quoted), *filter_params, limit])
             ids = [row["id"] for row in cursor]
             # Adjacent phrases are an implicit AND — a long natural-language
             # query with a single term absent from the KB matches nothing.
             # Retry as OR so partial keyword overlap still contributes a
             # ranked list to fusion.
             if not ids and len(quoted) > 1:
-                cursor = conn.execute(
-                    sql, [" OR ".join(quoted), *filter_params, limit]
-                )
+                cursor = conn.execute(sql, [" OR ".join(quoted), *filter_params, limit])
                 ids = [row["id"] for row in cursor]
             return ids
         except sqlite3.OperationalError as exc:
@@ -888,8 +859,7 @@ class SQLiteBackend:
             return []
 
         score_terms = " + ".join(
-            "(CASE WHEN lower(e.title) LIKE ? OR lower(e.tags) LIKE ? "
-            "THEN ? ELSE 0 END)"
+            "(CASE WHEN lower(e.title) LIKE ? OR lower(e.tags) LIKE ? THEN ? ELSE 0 END)"
             for _ in weights
         )
         match_params: list[Any] = []
@@ -950,7 +920,7 @@ class SQLiteBackend:
         cursor = conn.execute(sql, [*tag_params, *type_params, *part_of_params])
 
         ids: list[str] = []
-        vectors: list[np.ndarray] = []
+        vectors: list[np.ndarray[Any, Any]] = []
         for row in cursor:
             ids.append(row["id"])
             vectors.append(np.frombuffer(row["embedding"], dtype=np.float32))
@@ -968,11 +938,11 @@ class SQLiteBackend:
         denom[denom == 0] = np.inf
         similarities = (matrix @ query_vec) / denom
 
-        ranked = np.argsort(-similarities)[:limit]
+        ranked_idx = np.argsort(-similarities)[:limit]
         # Drop candidates that aren't a real semantic match — cosine
         # similarity is never exactly zero, so without this cutoff every
         # query would "match" every entry in the KB.
-        ranked = [i for i in ranked if similarities[i] >= MIN_COSINE_SIMILARITY]
+        ranked = [i for i in ranked_idx if similarities[i] >= MIN_COSINE_SIMILARITY]
         return [ids[i] for i in ranked]
 
     def find_similar_by_embedding(
@@ -1006,12 +976,11 @@ class SQLiteBackend:
         conn = self._connect()
         try:
             cursor = conn.execute(
-                "SELECT id, embedding FROM entries "
-                "WHERE embedding IS NOT NULL AND id != ?",
+                "SELECT id, embedding FROM entries WHERE embedding IS NOT NULL AND id != ?",
                 (exclude_id,),
             )
             ids: list[str] = []
-            vectors: list[np.ndarray] = []
+            vectors: list[np.ndarray[Any, Any]] = []
             for row in cursor:
                 ids.append(row["id"])
                 vectors.append(np.frombuffer(row["embedding"], dtype=np.float32))
@@ -1056,7 +1025,7 @@ class SQLiteBackend:
         if not entry_ids:
             return
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn = self._connect()
         try:
             conn.executemany(
@@ -1135,7 +1104,7 @@ class SQLiteBackend:
         )
         usage = {row["id"]: row for row in cursor}
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for item in fused:
             row = usage.get(item["id"])
             access_count = row["access_count"] if row else 0
@@ -1150,7 +1119,7 @@ class SQLiteBackend:
                         # record_access always writes UTC, but a value
                         # edited into the index by hand may be naive —
                         # subtracting it from an aware `now` would raise
-                        accessed_at = accessed_at.replace(tzinfo=timezone.utc)
+                        accessed_at = accessed_at.replace(tzinfo=UTC)
                     days = max((now - accessed_at).total_seconds(), 0.0) / 86400
                     decay = 0.5 ** (days / STALENESS_HALF_LIFE_DAYS)
                 except (ValueError, TypeError):
@@ -1160,11 +1129,7 @@ class SQLiteBackend:
                         last_accessed,
                     )
 
-            boost = (
-                1.0
-                if entry_type in self._no_boost_types
-                else 1.0 + math.log1p(access_count)
-            )
+            boost = 1.0 if entry_type in self._no_boost_types else 1.0 + math.log1p(access_count)
             factor = boost * decay
             if access_count > 0:
                 # Floor at 1.0 so a once-read entry's displayed staleness
@@ -1283,9 +1248,7 @@ class SQLiteBackend:
             # channel below is a different kind of signal (literal, not
             # graph-derived) and is fused rather than gating results, so
             # it can only add candidates BM25/vector missed, not remove any.
-            fused = self._rrf_fuse(
-                [bm25_ids, vector_ids, exact_ids], candidate_limit
-            )
+            fused = self._rrf_fuse([bm25_ids, vector_ids, exact_ids], candidate_limit)
             results = self._apply_staleness(conn, fused)[:limit]
         finally:
             conn.close()
@@ -1317,8 +1280,7 @@ class SQLiteBackend:
             usage_cache: dict[str, tuple[int, str]] = {}
             try:
                 cursor = conn.execute(
-                    "SELECT id, content_hash, embedding, access_count, "
-                    "last_accessed FROM entries"
+                    "SELECT id, content_hash, embedding, access_count, last_accessed FROM entries"
                 )
                 for row in cursor:
                     if row["embedding"] is not None and row["content_hash"]:
@@ -1345,18 +1307,14 @@ class SQLiteBackend:
             # Reuse cached embeddings for unchanged entries; batch-encode
             # only the rest in one model call.
             embeddings: list[bytes | None] = [
-                embedding_cache.get(self._content_hash(e["title"], e["content"]))
-                for e in entries
+                embedding_cache.get(self._content_hash(e["title"], e["content"])) for e in entries
             ]
             missing = [i for i, emb in enumerate(embeddings) if emb is None]
             model = _get_model(self._embedding_model)
             if model is not None and missing:
-                texts = [
-                    f"{entries[i]['title']}\n{entries[i]['content']}"
-                    for i in missing
-                ]
+                texts = [f"{entries[i]['title']}\n{entries[i]['content']}" for i in missing]
                 vectors = model.encode(texts).astype(np.float32)
-                for i, vector in zip(missing, vectors):
+                for i, vector in zip(missing, vectors, strict=True):
                     embeddings[i] = vector.tobytes()
             if entries:
                 logger.info(
@@ -1367,18 +1325,16 @@ class SQLiteBackend:
 
             # Bulk insert all entries
             count = 0
-            for entry, embedding in zip(entries, embeddings):
+            for entry, embedding in zip(entries, embeddings, strict=True):
                 self._index_entry_with_conn(entry, conn, embedding=embedding)
                 count += 1
 
             # Restore usage counters for entries that still exist
             conn.executemany(
-                "UPDATE entries SET access_count = ?, last_accessed = ? "
-                "WHERE id = ?",
+                "UPDATE entries SET access_count = ?, last_accessed = ? WHERE id = ?",
                 [
                     (access_count, last_accessed, entry_id)
-                    for entry_id, (access_count, last_accessed)
-                    in usage_cache.items()
+                    for entry_id, (access_count, last_accessed) in usage_cache.items()
                 ],
             )
 
@@ -1518,8 +1474,7 @@ class SQLiteBackend:
                 (entry_id,),
             ).fetchone()[0]
             in_total = conn.execute(
-                "SELECT COUNT(*) FROM relations "
-                "WHERE target_id = ? AND source_id != ?",
+                "SELECT COUNT(*) FROM relations WHERE target_id = ? AND source_id != ?",
                 (entry_id, entry_id),
             ).fetchone()[0]
 
@@ -1531,15 +1486,9 @@ class SQLiteBackend:
                 "in_total": in_total,
             }
             if hops == 2:
-                out, out_truncated = self._expand_hop2(
-                    conn, entry_id, out_rows, "out", limit
-                )
-                incoming, in_truncated = self._expand_hop2(
-                    conn, entry_id, in_rows, "in", limit
-                )
-                result["hop2_total"] = sum(
-                    1 for row in (*out, *incoming) if row["hops"] == 2
-                )
+                out, out_truncated = self._expand_hop2(conn, entry_id, out_rows, "out", limit)
+                incoming, in_truncated = self._expand_hop2(conn, entry_id, in_rows, "in", limit)
+                result["hop2_total"] = sum(1 for row in (*out, *incoming) if row["hops"] == 2)
                 result["hop2_truncated"] = out_truncated or in_truncated
             else:
                 out = [{**row, "hops": 1} for row in out_rows]
@@ -1562,9 +1511,7 @@ class SQLiteBackend:
 
         conn = self._connect()
         try:
-            cursor = conn.execute(
-                "SELECT source_id, target_id, type, edge_type FROM relations"
-            )
+            cursor = conn.execute("SELECT source_id, target_id, type, edge_type FROM relations")
             relations = [
                 {
                     "source_id": row["source_id"],
@@ -1702,9 +1649,7 @@ class SQLiteBackend:
             recalled_id = row["entry_id"]
             for search_row in reversed(pending_searches):
                 returned = (
-                    json.loads(search_row["returned_ids"])
-                    if search_row["returned_ids"]
-                    else []
+                    json.loads(search_row["returned_ids"]) if search_row["returned_ids"] else []
                 )
                 if recalled_id in returned:
                     recall_ranks.append(returned.index(recalled_id) + 1)
@@ -1712,9 +1657,7 @@ class SQLiteBackend:
                         try:
                             search_ts = datetime.fromisoformat(search_row["ts"])
                             recall_ts = datetime.fromisoformat(row["ts"])
-                            gap_minutes = (
-                                recall_ts - search_ts
-                            ).total_seconds() / 60
+                            gap_minutes = (recall_ts - search_ts).total_seconds() / 60
                             if 0 <= gap_minutes <= click_through_window_minutes:
                                 clicked += 1
                         except (ValueError, TypeError):
@@ -1763,9 +1706,7 @@ class SQLiteBackend:
         conn = self._connect()
         try:
             tool_counts = dict(
-                conn.execute(
-                    "SELECT tool, COUNT(*) FROM query_log GROUP BY tool"
-                ).fetchall()
+                conn.execute("SELECT tool, COUNT(*) FROM query_log GROUP BY tool").fetchall()
             )
             searches = tool_counts.get("search", 0)
             recalls = tool_counts.get("recall", 0)
@@ -1799,13 +1740,10 @@ class SQLiteBackend:
             }
 
             dead_row = conn.execute(
-                "SELECT COUNT(*), COUNT(CASE WHEN access_count = 0 THEN 1 END) "
-                "FROM entries"
+                "SELECT COUNT(*), COUNT(CASE WHEN access_count = 0 THEN 1 END) FROM entries"
             ).fetchone()
             total_entries, never_accessed = dead_row[0], dead_row[1]
-            stale_cutoff = (
-                datetime.now(timezone.utc) - timedelta(days=dead_entry_stale_days)
-            ).isoformat()
+            stale_cutoff = (datetime.now(UTC) - timedelta(days=dead_entry_stale_days)).isoformat()
             stale_accessed = conn.execute(
                 "SELECT COUNT(*) FROM entries WHERE access_count > 0 "
                 "AND last_accessed != '' AND last_accessed < ?",
@@ -1816,9 +1754,7 @@ class SQLiteBackend:
                 "SELECT COUNT(DISTINCT session_id) FROM query_log"
             ).fetchone()[0]
 
-            session_metrics = self._session_analytics(
-                conn, click_through_window_minutes
-            )
+            session_metrics = self._session_analytics(conn, click_through_window_minutes)
         finally:
             conn.close()
 

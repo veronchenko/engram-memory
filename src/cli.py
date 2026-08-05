@@ -19,8 +19,9 @@ import sys
 import tarfile
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from config import ADMIN_API_DEFAULT_HOST, env
 
@@ -28,7 +29,8 @@ _MERGED_SERVER_DEFAULT_PORT = 8192
 
 
 def _admin_url() -> str:
-    default = f"http://{ADMIN_API_DEFAULT_HOST}:{env('PORT', str(_MERGED_SERVER_DEFAULT_PORT))}/admin/api"
+    port = env("PORT", str(_MERGED_SERVER_DEFAULT_PORT))
+    default = f"http://{ADMIN_API_DEFAULT_HOST}:{port}/admin/api"
     return env("ADMIN_API_URL", default)
 
 
@@ -45,7 +47,7 @@ def _admin_key() -> str:
     return key
 
 
-def _request(method: str, path: str, body: dict | None = None) -> dict:
+def _request(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
     url = _admin_url().rstrip("/") + path
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, method=method, data=data)
@@ -94,7 +96,7 @@ def _cmd_backup(args: argparse.Namespace) -> None:
     dest_dir = Path(args.dest)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest_file = dest_dir / f"engram-backup-{timestamp}.tar.gz"
 
     with tarfile.open(dest_file, "w:gz") as tar:
@@ -127,10 +129,13 @@ def main(argv: list[str] | None = None) -> None:
         "backup", help="Tar-snapshot the knowledge data to a destination directory"
     )
     backup.add_argument(
-        "--data-path", default=env("DATA_PATH", "/knowledge"),
+        "--data-path",
+        default=env("DATA_PATH", "/knowledge"),
         help="Root path for knowledge data (env: ENGRAM_DATA_PATH, default: /knowledge)",
     )
-    backup.add_argument("--dest", required=True, help="Destination directory for the tar.gz snapshot")
+    backup.add_argument(
+        "--dest", required=True, help="Destination directory for the tar.gz snapshot"
+    )
     backup.set_defaults(func=_cmd_backup)
 
     args = parser.parse_args(argv)

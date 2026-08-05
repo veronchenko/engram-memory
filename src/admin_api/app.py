@@ -61,7 +61,7 @@ def create_app(store: TeamAdminStore, api_key: str) -> FastAPI:
     app = FastAPI(title="Engram Admin API")
 
     def _require_admin(
-        creds: HTTPAuthorizationCredentials = Depends(_bearer),
+        creds: HTTPAuthorizationCredentials = Depends(_bearer),  # noqa: B008
     ) -> None:
         if not secrets.compare_digest(creds.credentials, api_key):
             raise HTTPException(status_code=401, detail="Invalid admin API key")
@@ -87,13 +87,17 @@ def create_app(store: TeamAdminStore, api_key: str) -> FastAPI:
     def list_teams() -> list[TeamOut]:
         return [
             TeamOut(
-                name=t.name, folder=t.folder,
-                created_at=t.created_at, revoked_at=t.revoked_at,
+                name=t.name,
+                folder=t.folder,
+                created_at=t.created_at,
+                revoked_at=t.revoked_at,
             )
             for t in store.list_teams()
         ]
 
-    @app.post("/teams/{name}/revoke", response_model=TeamOut, dependencies=[Depends(_require_admin)])
+    @app.post(
+        "/teams/{name}/revoke", response_model=TeamOut, dependencies=[Depends(_require_admin)]
+    )
     def revoke_team(name: str) -> TeamOut:
         if not store.revoke_team(name):
             raise HTTPException(status_code=404, detail=f"Team {name!r} not found")

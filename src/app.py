@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -30,7 +31,7 @@ from fastmcp.server.auth.auth import RemoteAuthProvider
 from pydantic import AnyHttpUrl
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.routing import Route
-from starlette.types import Receive, Scope, Send
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from admin_api.app import create_app as create_admin_app
 from config import ServerSettings
@@ -87,7 +88,7 @@ class _McpNoTrailingSlash:
     since it's built with `http_app(path="/", ...)`) rather than "/mcp/".
     """
 
-    def __init__(self, asgi_app) -> None:
+    def __init__(self, asgi_app: ASGIApp) -> None:
         self._app = asgi_app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -161,7 +162,7 @@ def build_multi_tenant_app(
     admin_json_app = create_admin_app(store, args.admin_api_key)
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with mcp_asgi.lifespan(mcp_asgi):
             yield
 
@@ -172,17 +173,19 @@ def build_multi_tenant_app(
         https_only=args.public_url.startswith("https://"),
     )
 
-    app.mount("/admin/static", StaticFiles(directory=str(_ADMIN_DIR / "static")), name="admin_static")
+    app.mount(
+        "/admin/static", StaticFiles(directory=str(_ADMIN_DIR / "static")), name="admin_static"
+    )
     app.mount("/admin/api", admin_json_app)
     app.router.routes.append(Route("/mcp", endpoint=_McpNoTrailingSlash(mcp_asgi)))
     app.mount("/mcp", mcp_asgi)
 
     @app.get("/login")
-    def login_form(request: Request):
+    def login_form(request: Request) -> Response:
         return _templates.TemplateResponse(request, "login.html", {"error": None})
 
     @app.post("/login")
-    async def login_submit(request: Request, key: str = Form(...)):
+    async def login_submit(request: Request, key: str = Form(...)) -> Response:
         if secrets.compare_digest(key, args.admin_api_key):
             request.session["role"] = "admin"
             return RedirectResponse("/admin", status_code=303)
@@ -198,7 +201,7 @@ def build_multi_tenant_app(
         )
 
     @app.post("/logout")
-    def logout(request: Request):
+    def logout(request: Request) -> Response:
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
 
@@ -207,14 +210,12 @@ def build_multi_tenant_app(
             raise HTTPException(status_code=401, detail="Admin login required")
 
     @app.get("/admin")
-    def admin_page(request: Request):
+    def admin_page(request: Request) -> Response:
         _require_admin_session(request)
-        return _templates.TemplateResponse(
-            request, "admin.html", {"teams": store.list_teams()}
-        )
+        return _templates.TemplateResponse(request, "admin.html", {"teams": store.list_teams()})
 
     @app.post("/admin/teams")
-    def admin_add_team(request: Request, name: str = Form(...)):
+    def admin_add_team(request: Request, name: str = Form(...)) -> Response:
         _require_admin_session(request)
         new_key = None
         error = None
@@ -230,7 +231,7 @@ def build_multi_tenant_app(
         )
 
     @app.post("/admin/teams/{name}/revoke")
-    def admin_revoke_team(request: Request, name: str):
+    def admin_revoke_team(request: Request, name: str) -> Response:
         _require_admin_session(request)
         if not store.revoke_team(name):
             raise HTTPException(status_code=404, detail=f"Team {name!r} not found")

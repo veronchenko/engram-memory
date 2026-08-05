@@ -32,6 +32,4 @@ def find_free_port(host: str, start_port: int, max_attempts: int = 100) -> int:
                 continue
             return port
 
-    raise RuntimeError(
-        f"No free port found in range [{start_port}, {start_port + max_attempts})"
-    )
+    raise RuntimeError(f"No free port found in range [{start_port}, {start_port + max_attempts})")
