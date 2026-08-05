@@ -4,8 +4,16 @@
 # Production image only — this is the sole stage, so a plain
 # `docker build -t <tag> .` (no --target) always builds production.
 # The test image lives in tests/Dockerfile and builds FROM this image.
+#
+# No venv: the container itself is already the isolation boundary, so
+# packages install straight into the system interpreter (`uv pip install
+# --system`). Dependencies still come from pyproject.toml/uv.lock (single
+# source of truth) via `uv export`, which is exported *without* the project
+# itself (--no-emit-project) so this layer only needs pyproject.toml/uv.lock,
+# not the source tree — keeping the cache-across-code-edits property the
+# previous requirements.txt-based layer had.
 
-FROM python:3.13-alpine
+FROM ghcr.io/astral-sh/uv:python3.13-alpine
 
 WORKDIR /app
 
@@ -14,9 +22,13 @@ WORKDIR /app
 # would force the overlay filesystem to duplicate the ~1GB cache layer.
 RUN addgroup -S engram && adduser -S engram -G engram
 
-# Install Python dependencies
-COPY src/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install runtime dependencies only (no dev/test groups, no project itself
+# — added later via --no-deps once the source is present).
+ENV UV_LINK_MODE=copy
+COPY src/pyproject.toml src/uv.lock ./
+RUN uv export --locked --no-default-groups --no-emit-project --no-hashes -o /tmp/requirements.txt \
+    && uv pip install --system --no-cache -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 # Pre-download the embedding model into the image so runtime and tests
 # never need network access for it. Done before COPY src/ so editing app
@@ -33,11 +45,14 @@ COPY src/ ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Editable install so the `engram` console script (admin CLI) is on PATH,
-# without moving the flat module layout server.py/config.py/... already
-# rely on (schema.py resolves schema.json relative to its own file, not
-# via package resources — an editable install keeps that path valid).
-RUN pip install --no-cache-dir -e .
+# Add just the project itself (--no-deps: dependencies are already
+# satisfied from the export above — reinstalling them here would double
+# their size in this layer, the way a second unrestricted `uv sync` did).
+# Editable so the `engram` console script (admin CLI) is on PATH, without
+# moving the flat module layout server.py/config.py/... already rely on
+# (schema.py resolves schema.json relative to its own file, not via package
+# resources — an editable install keeps that path valid).
+RUN uv pip install --system --no-cache --no-deps -e .
 
 RUN mkdir -p /knowledge && chown engram:engram /knowledge
 USER engram

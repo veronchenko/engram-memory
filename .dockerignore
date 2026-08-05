@@ -1,10 +1,10 @@
 .git
 .gitignore
-.venv
-venv
-.pytest_cache
-.ruff_cache
-__pycache__
+**/.venv
+**/venv
+**/.pytest_cache
+**/.ruff_cache
+**/__pycache__
 .claude
 .impeccable
 docker-mcp-registry
@@ -14,4 +14,3 @@ scripts
 ci/
 docs/
 *.md
-!src/requirements.txt

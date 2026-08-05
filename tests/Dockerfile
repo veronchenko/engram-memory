@@ -9,7 +9,12 @@ FROM engram:latest
 
 USER root
 
-RUN pip install --no-cache-dir pytest==8.4.2 httpx==0.28.1
+# pyproject.toml/uv.lock (with the pinned "test" group) were left in /app by
+# the production build — export just that group and install it straight
+# into the system interpreter, same as the production layer does.
+RUN uv export --locked --only-group test --no-emit-project --no-hashes -o /tmp/requirements-test.txt \
+    && uv pip install --system --no-cache -r /tmp/requirements-test.txt \
+    && rm /tmp/requirements-test.txt
 
 # tests/ expects a sibling src/ dir (Path(__file__).parent.parent / "src");
 # the production image flattens src/ straight into /app, so point a symlink
