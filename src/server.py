@@ -19,14 +19,15 @@ import json
 import logging
 import re
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.fastmcp import FastMCP
+from fastmcp import Context, FastMCP
+from fastmcp.server.auth.auth import AccessToken, TokenVerifier
+from fastmcp.server.dependencies import get_access_token
 
 from config import ServerSettings, env, parse_server_args
 from database import KnowledgeBase
@@ -600,6 +601,7 @@ class TeamTokenVerifier(TokenVerifier):
     """Resolves a bearer token to a team folder via TeamAdminStore."""
 
     def __init__(self, store: TeamAdminStore) -> None:
+        super().__init__()
         self._store = store
 
     async def verify_token(self, token: str) -> AccessToken | None:
@@ -647,12 +649,15 @@ def main() -> None:
                 "Port %d in use, using free port %d instead", args.port, port
             )
 
-    mcp = FastMCP(name="Engram", host=args.host, port=port)
+    mcp = FastMCP(name="Engram")
 
     register_tools(mcp, kb, logger, schema)
 
     logger.info("Starting Engram (%s transport)", args.transport)
-    mcp.run(transport=args.transport)
+    if args.transport == "stdio":
+        mcp.run(transport=args.transport)
+    else:
+        mcp.run(transport=args.transport, host=args.host, port=port)
 
 
 def _run_multi_tenant(args: ServerSettings, logger: logging.Logger) -> None:

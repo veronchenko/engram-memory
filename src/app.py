@@ -25,8 +25,9 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
+from fastmcp.server.auth.auth import RemoteAuthProvider
+from pydantic import AnyHttpUrl
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
@@ -69,10 +70,13 @@ class _McpNoTrailingSlash:
 
     Once mounted at the "/mcp" prefix, mcp_asgi's own route only matches
     a remainder of "/" — a request for exactly "/mcp" strips to an empty
-    remainder and 404s (see mcp python-sdk docs/run/asgi.md). Rewriting
-    the scope's path in-process — not an HTTP redirect — keeps this
-    working for POST/SSE bodies that most HTTP clients won't re-send
-    across a redirect.
+    remainder and 404s. Still needed under `fastmcp`'s `http_app()` in
+    the full merged app (verified: an isolated `Mount("/mcp", mcp_asgi)`
+    with no other routes handles the bare path fine, but with the rest of
+    this app's mounts/middleware in place, it 404s again) — rewriting the
+    scope's path in-process, not an HTTP redirect, keeps this working for
+    POST/SSE bodies that most HTTP clients won't re-send across a
+    redirect.
 
     Registered as an exact-match Route *before* the "/mcp" Mount below,
     so it only intercepts the bare path; "/mcp/..." still falls through
@@ -80,7 +84,7 @@ class _McpNoTrailingSlash:
 
     Called directly (not via Mount), so there is no prefix-stripping —
     the rewritten path must match mcp_asgi's own internal route ("/",
-    since it's built with streamable_http_path="/") rather than "/mcp/".
+    since it's built with `http_app(path="/", ...)`) rather than "/mcp/".
     """
 
     def __init__(self, asgi_app) -> None:
@@ -109,28 +113,26 @@ def build_multi_tenant_app(
         logger: Process logger.
 
     Returns:
-        A FastAPI app whose lifespan runs the MCP session manager — the
-        streamable-http sub-app's own lifespan is dead code once mounted,
-        so the host app must drive `mcp.session_manager.run()` itself.
+        A FastAPI app whose lifespan drives the MCP session manager via
+        `mcp_asgi.lifespan` — the streamable-http sub-app's own lifespan
+        isn't triggered automatically once mounted, so the host app must
+        run it itself.
     """
 
-    mcp = FastMCP(
-        name="Engram",
-        host=args.host,
-        port=args.port,
+    auth = RemoteAuthProvider(
         token_verifier=TeamTokenVerifier(store),
-        auth=AuthSettings(
-            issuer_url=args.public_url,
-            resource_server_url=args.public_url,
-        ),
-        # streamable_http_app()'s internal route defaults to "/mcp"; since
-        # it's mounted under the "/mcp" prefix below, moving that internal
-        # route to "/" keeps the public endpoint at exactly "/mcp" instead
-        # of "/mcp/mcp" (see mcp python-sdk docs/run/asgi.md).
-        streamable_http_path="/",
+        # Points the "authorization server" at ourselves — there is no
+        # real OAuth flow, teams use a static pre-shared key, but the
+        # RFC 9728 protected-resource metadata route (.well-known/...)
+        # still needs an authorization_servers entry to be well-formed.
+        authorization_servers=[AnyHttpUrl(args.public_url)],
+        base_url=args.public_url,
     )
+    mcp = FastMCP(name="Engram", auth=auth)
     register_tools(mcp, registry.resolve_current, logger, schema)
-    mcp_asgi = mcp.streamable_http_app()
+    # path="/" keeps the public endpoint at exactly "/mcp" once mounted
+    # under the "/mcp" prefix below, instead of "/mcp/mcp".
+    mcp_asgi = mcp.http_app(path="/", transport="streamable-http")
 
     def _kb_resolver(request: Request) -> KnowledgeBase:
         role = request.session.get("role")
@@ -160,7 +162,7 @@ def build_multi_tenant_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        async with mcp.session_manager.run():
+        async with mcp_asgi.lifespan(mcp_asgi):
             yield
 
     app = FastAPI(title="Engram", lifespan=lifespan)
