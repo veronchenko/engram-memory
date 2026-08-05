@@ -102,6 +102,26 @@ WRITE_GATE_CANDIDATES: int = 20
 STALENESS_HALF_LIFE_DAYS: float = 69.0
 
 # ---------------------------------------------------------------------------
+# Usage analytics (query_log) tuning constants
+# ---------------------------------------------------------------------------
+
+# query_text is truncated before storage — a full natural-language query is
+# rarely needed to spot a KB gap, and unbounded storage would let the log
+# grow proportionally to query length instead of query count.
+QUERY_LOG_TEXT_TRUNCATE: int = 500
+
+# Click-through: a search's top result counts as "clicked" only if the
+# matching recall() happens within this many minutes — an old, unrelated
+# recall days later in the same long-lived session shouldn't count.
+CLICK_THROUGH_WINDOW_MINUTES: float = 30.0
+
+# Dead entries: never accessed, or not accessed in this many days.
+DEAD_ENTRY_STALE_DAYS: float = 90.0
+
+# How many distinct zero-hit queries /api/analytics reports, most frequent first.
+ZERO_HIT_QUERIES_LIMIT: int = 50
+
+# ---------------------------------------------------------------------------
 # database.py tuning constants
 # ---------------------------------------------------------------------------
 

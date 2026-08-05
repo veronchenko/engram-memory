@@ -1425,6 +1425,25 @@ class KnowledgeBase:
 
         return result
 
+    def log_query_event(self, **fields: Any) -> None:
+        """
+        Record one search/recall/remember call for usage analytics.
+
+        Thin passthrough to the backend — see SQLiteBackend.log_query_event
+        for the field list.
+        """
+
+        self._backend.log_query_event(**fields)
+
+    def get_analytics_snapshot(self, **kwargs: Any) -> dict[str, Any]:
+        """
+        Aggregate query_log + entries into the /api/analytics metric set.
+
+        Thin passthrough to the backend — see SQLiteBackend.get_analytics_snapshot.
+        """
+
+        return self._backend.get_analytics_snapshot(**kwargs)
+
     def get_graph(self, include_superseded: bool = False) -> dict[str, list[dict[str, Any]]]:
         """
         Build the full entry graph (nodes + edges) for visualization.

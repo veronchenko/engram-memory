@@ -7,6 +7,7 @@ operations against the SQLite FTS5 backend.
 
 from __future__ import annotations
 
+import json
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -1589,3 +1590,204 @@ class TestPartOfSearch:
         results = kb.search("quixotic")
 
         assert member["id"] in {r["id"] for r in results}
+
+
+class TestQueryLog:
+    """query_log SQLite writes and get_analytics_snapshot aggregation."""
+
+    def test_log_query_event_persists_a_row(self, kb: KnowledgeBase) -> None:
+        """A logged event is readable back from the query_log table."""
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00",
+            session_id="sess-1",
+            tool="search",
+            query_text="widget",
+            entry_type=None,
+            returned_ids=["a", "b"],
+            top_result_id="a",
+            hit=True,
+            latency_ms=12,
+        )
+
+        conn = kb._backend._connect()
+        try:
+            row = conn.execute("SELECT * FROM query_log").fetchone()
+        finally:
+            conn.close()
+
+        assert row["tool"] == "search"
+        assert row["session_id"] == "sess-1"
+        assert row["hit"] == 1
+        assert json.loads(row["returned_ids"]) == ["a", "b"]
+
+    def test_query_text_truncated(self, kb: KnowledgeBase) -> None:
+        """query_text longer than QUERY_LOG_TEXT_TRUNCATE is cut down."""
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00",
+            session_id="sess-1",
+            tool="search",
+            query_text="x" * 1000,
+            hit=False,
+        )
+
+        conn = kb._backend._connect()
+        try:
+            row = conn.execute("SELECT query_text FROM query_log").fetchone()
+        finally:
+            conn.close()
+
+        from config import QUERY_LOG_TEXT_TRUNCATE
+
+        assert len(row["query_text"]) == QUERY_LOG_TEXT_TRUNCATE
+
+    def test_read_write_ratio(self, kb: KnowledgeBase) -> None:
+        """reads (search+recall) / remembers, per logged events."""
+
+        events = [
+            ("search", None), ("search", None), ("recall", None), ("remember", None),
+        ]
+        for tool, _ in events:
+            kb._backend.log_query_event(
+                ts="2026-08-05T00:00:00+00:00", session_id="s", tool=tool, hit=True,
+            )
+
+        snapshot = kb.get_analytics_snapshot()
+
+        assert snapshot["searches"] == 2
+        assert snapshot["recalls"] == 1
+        assert snapshot["remembers"] == 1
+        assert snapshot["read_write_ratio"] == 3.0
+
+    def test_read_write_ratio_none_without_writes(self, kb: KnowledgeBase) -> None:
+        """No remember calls logged yet -> ratio is undefined, not a ZeroDivisionError."""
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search", hit=True,
+        )
+
+        assert kb.get_analytics_snapshot()["read_write_ratio"] is None
+
+    def test_zero_hit_queries_and_hit_rate(self, kb: KnowledgeBase) -> None:
+        """Zero-hit queries are listed verbatim; hit_rate averages the flag."""
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            query_text="found it", hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            query_text="nothing here", hit=False,
+        )
+
+        snapshot = kb.get_analytics_snapshot()
+
+        assert snapshot["hit_rate"] == 0.5
+        assert snapshot["zero_hit_queries"] == [{"query": "nothing here", "count": 1}]
+
+    def test_hit_distribution_by_type(self, kb: KnowledgeBase) -> None:
+        """Per-entry_type hit rate, from the entry_type filter used on search."""
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            entry_type="diagnostic", hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            entry_type="diagnostic", hit=False,
+        )
+
+        dist = kb.get_analytics_snapshot()["hit_distribution_by_type"]
+
+        assert dist["diagnostic"] == {"hit_rate": 0.5, "total": 2}
+
+    def test_dead_entries_never_accessed(self, kb: KnowledgeBase) -> None:
+        """An entry never recalled counts as never_accessed."""
+
+        _create_entry(kb, "Untouched", "Nobody reads this.")
+
+        dead = kb.get_analytics_snapshot()["dead_entries"]
+
+        assert dead["never_accessed"] == 1
+        assert dead["total_entries"] == 1
+
+    def test_click_through_and_recall_rank(self, kb: KnowledgeBase) -> None:
+        """A recall of a search's top result, same session, is a click-through
+        with recall rank 1; searches_per_recall counts the one search first."""
+
+        created = _create_entry(kb, "Ranked Entry", "Unique ranked content.")
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            query_text="ranked", returned_ids=[created["id"]],
+            top_result_id=created["id"], hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:01+00:00", session_id="s", tool="recall",
+            entry_id=created["id"], hit=True,
+        )
+
+        snapshot = kb.get_analytics_snapshot()
+
+        assert snapshot["click_through_rate"] == 1.0
+        assert snapshot["average_recall_rank"] == 1
+        assert snapshot["searches_per_recall"] == 1
+
+    def test_click_through_outside_window_does_not_count(
+        self, kb: KnowledgeBase
+    ) -> None:
+        """A recall long after the search still confirms recall rank, but
+        is not a click-through past the configured window."""
+
+        created = _create_entry(kb, "Late Entry", "Unique late content.")
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            query_text="late", returned_ids=[created["id"]],
+            top_result_id=created["id"], hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T01:00:00+00:00", session_id="s", tool="recall",
+            entry_id=created["id"], hit=True,
+        )
+
+        snapshot = kb.get_analytics_snapshot(click_through_window_minutes=30)
+
+        assert snapshot["click_through_rate"] == 0.0
+        assert snapshot["average_recall_rank"] == 1
+
+    def test_recall_rank_beyond_top_result(self, kb: KnowledgeBase) -> None:
+        """A recall of the 2nd result is not click-through, but rank is 2."""
+
+        created = _create_entry(kb, "Second Place", "Unique second content.")
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s", tool="search",
+            query_text="second", returned_ids=["other-id", created["id"]],
+            top_result_id="other-id", hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:01+00:00", session_id="s", tool="recall",
+            entry_id=created["id"], hit=True,
+        )
+
+        snapshot = kb.get_analytics_snapshot()
+
+        assert snapshot["average_recall_rank"] == 2
+        assert snapshot["click_through_rate"] == 0.0
+
+    def test_sessions_touching_engram(self, kb: KnowledgeBase) -> None:
+        """Distinct session_id count, across any tool."""
+
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s1", tool="search", hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s2", tool="search", hit=True,
+        )
+        kb._backend.log_query_event(
+            ts="2026-08-05T00:00:00+00:00", session_id="s1", tool="recall", hit=True,
+        )
+
+        assert kb.get_analytics_snapshot()["sessions_touching_engram"] == 2

@@ -145,6 +145,7 @@ def register_tools(
     @mcp.tool()
     def search(
         query: str,
+        ctx: Context,
         tags: list[str] | None = None,
         limit: int = 10,
         include_superseded: bool = False,
@@ -182,6 +183,7 @@ def register_tools(
             part_of,
         )
 
+        start = time.perf_counter()
         results = kb.search(
             query,
             tags=tags,
@@ -190,6 +192,9 @@ def register_tools(
             entry_type=type_name,
             part_of=part_of,
         )
+        latency_ms = int((time.perf_counter() - start) * 1000)
+
+        returned_ids = [r["id"] for r in results]
 
         # access_count/last_accessed/staleness are display-only (don't
         # affect ranking, see _apply_staleness) and last_accessed/staleness
@@ -208,13 +213,26 @@ def register_tools(
             tags=tags,
             entry_type=type_name,
             part_of=part_of,
-            returned_ids=[r["id"] for r in results],
+            returned_ids=returned_ids,
+        )
+        kb.log_query_event(
+            ts=datetime.now(timezone.utc).isoformat(),
+            session_id=ctx.session_id,
+            tool="search",
+            query_text=query,
+            entry_type=type_name,
+            returned_ids=returned_ids,
+            top_result_id=returned_ids[0] if returned_ids else None,
+            hit=bool(returned_ids),
+            latency_ms=latency_ms,
         )
 
         return {"count": len(results), "results": results}
 
     @mcp.tool()
-    def recall(entry_id: str, relations_limit: int = 20, hops: int = 1) -> dict:
+    def recall(
+        entry_id: str, ctx: Context, relations_limit: int = 20, hops: int = 1
+    ) -> dict:
         """
         Read a full entry by id, with its graph relations.
 
@@ -252,6 +270,7 @@ def register_tools(
             entry_id, relations_limit, hops,
         )
 
+        start = time.perf_counter()
         entry = kb.get(
             entry_id,
             with_relations=True,
@@ -260,7 +279,16 @@ def register_tools(
             digest=True,
             hops=hops,
         )
+        latency_ms = int((time.perf_counter() - start) * 1000)
         log_query("recall", entry_id=entry_id, found=entry is not None)
+        kb.log_query_event(
+            ts=datetime.now(timezone.utc).isoformat(),
+            session_id=ctx.session_id,
+            tool="recall",
+            entry_id=entry_id,
+            hit=entry is not None,
+            latency_ms=latency_ms,
+        )
 
         if not entry:
             return {"error": f"Entry {entry_id} not found"}
@@ -282,6 +310,7 @@ def register_tools(
         content: str,
         tags: list[str],
         entry_type: EntryType,
+        ctx: Context,
         entry_id: str | None = None,
         force: bool = False,
         resource: str | None = None,
@@ -333,6 +362,7 @@ def register_tools(
             part_of,
         )
 
+        start = time.perf_counter()
         result = kb.remember(
             title,
             content,
@@ -343,6 +373,16 @@ def register_tools(
             resource=resource,
             supersede=supersede,
             part_of=part_of,
+        )
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        kb.log_query_event(
+            ts=datetime.now(timezone.utc).isoformat(),
+            session_id=ctx.session_id,
+            tool="remember",
+            entry_type=type_name,
+            entry_id=result.get("id"),
+            hit="error" not in result,
+            latency_ms=latency_ms,
         )
 
         if "error" not in result:

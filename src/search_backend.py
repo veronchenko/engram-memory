@@ -16,7 +16,7 @@ import math
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,16 +25,20 @@ from model2vec import StaticModel
 
 from config import (
     CANDIDATE_FRACTION_DIVISOR,
+    CLICK_THROUGH_WINDOW_MINUTES,
+    DEAD_ENTRY_STALE_DAYS,
     DEFAULT_EMBEDDING_MODEL,
     MIN_COSINE_SIMILARITY,
     MIN_EXACT_DISCRIMINATING_TOKENS,
     MIN_EXACT_TOKEN_LEN,
+    QUERY_LOG_TEXT_TRUNCATE,
     RRF_K,
     STALENESS_HALF_LIFE_DAYS,
     SUGGESTION_MIN_SIMILARITY,
     SUGGESTION_TOP_K,
     WRITE_GATE_CANDIDATES,
     WRITE_GATE_MIN_SIMILARITY,
+    ZERO_HIT_QUERIES_LIMIT,
 )
 from schema import DEFAULT_EDGE, DEFAULT_EDGES
 
@@ -188,6 +192,34 @@ CREATE TABLE IF NOT EXISTS relations (
 # table scan.
 _SQL_CREATE_RELATIONS_TARGET_INDEX: str = """
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_id)
+"""
+
+# One row per search/recall/remember tool call — the usage-analytics trace
+# behind /api/analytics. Distinct from the optional ENGRAM_QUERY_LOG JSONL
+# file (log_query() in server.py), which keeps feeding
+# scripts/eval_retrieval.py unchanged; this is a separate write path, not a
+# replacement, and deliberately does not touch access_count/last_accessed
+# (see the rich-get-richer fix on search hits).
+_SQL_CREATE_QUERY_LOG: str = """
+CREATE TABLE IF NOT EXISTS query_log (
+    id INTEGER PRIMARY KEY,
+    ts TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    query_text TEXT,
+    entry_type TEXT,
+    returned_ids TEXT,
+    top_result_id TEXT,
+    entry_id TEXT,
+    hit INTEGER,
+    latency_ms INTEGER
+)
+"""
+
+# Every session-scoped analytics query (searches-per-recall, average recall
+# rank, click-through) groups by session_id and orders by ts.
+_SQL_CREATE_QUERY_LOG_INDEX: str = """
+CREATE INDEX IF NOT EXISTS idx_query_log_session_ts ON query_log(session_id, ts)
 """
 
 
@@ -442,6 +474,9 @@ class SQLiteBackend:
 
             conn.execute(_SQL_CREATE_RELATIONS)
             conn.execute(_SQL_CREATE_RELATIONS_TARGET_INDEX)
+
+            conn.execute(_SQL_CREATE_QUERY_LOG)
+            conn.execute(_SQL_CREATE_QUERY_LOG_INDEX)
 
             conn.commit()
         finally:
@@ -1543,3 +1578,263 @@ class SQLiteBackend:
             conn.close()
 
         return relations
+
+    # -------------------------------------------------------------------
+    # Usage analytics (query_log)
+    # -------------------------------------------------------------------
+
+    def log_query_event(
+        self,
+        ts: str,
+        session_id: str,
+        tool: str,
+        query_text: str | None = None,
+        entry_type: str | None = None,
+        returned_ids: list[str] | None = None,
+        top_result_id: str | None = None,
+        entry_id: str | None = None,
+        hit: bool | None = None,
+        latency_ms: int | None = None,
+    ) -> None:
+        """
+        Append one search/recall/remember call to the query_log table.
+
+        Args:
+            ts: ISO8601 UTC timestamp of the call.
+            session_id: MCP session identifier (fastmcp Context.session_id).
+            tool: "search", "recall", or "remember".
+            query_text: Search query string, truncated to
+                QUERY_LOG_TEXT_TRUNCATE chars.
+            entry_type: Entry-type filter used (search) or the entry's own
+                type (remember) — powers the per-type hit distribution.
+            returned_ids: Ordered result ids (search only) — needed to
+                compute average recall rank, not just top_result_id.
+            top_result_id: First result id (search only).
+            entry_id: Target entry id (recall/remember).
+            hit: Whether the call found something (search: len(results) > 0;
+                recall/remember: found/succeeded).
+            latency_ms: Wall-clock duration of the underlying kb call.
+        """
+
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO query_log (ts, session_id, tool, query_text, "
+                "entry_type, returned_ids, top_result_id, entry_id, hit, "
+                "latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ts,
+                    session_id,
+                    tool,
+                    query_text[:QUERY_LOG_TEXT_TRUNCATE] if query_text else None,
+                    entry_type,
+                    json.dumps(returned_ids, ensure_ascii=False)
+                    if returned_ids is not None
+                    else None,
+                    top_result_id,
+                    entry_id,
+                    None if hit is None else int(hit),
+                    latency_ms,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _session_analytics(
+        self, conn: sqlite3.Connection, click_through_window_minutes: float
+    ) -> dict[str, Any]:
+        """
+        Walk query_log's search/recall rows session-by-session to compute
+        the metrics that need call order, not just aggregate counts:
+        click-through, searches-per-recall, and average recall rank.
+
+        For each recall, "the previous searches" means every search in the
+        same session since the last recall (or session start) — matching
+        the metric definitions in IDEA.md. Click-through and recall rank
+        both look at that window's most recent search that actually
+        returned the recalled entry_id.
+
+        Args:
+            conn: An already-open sqlite3.Connection instance.
+            click_through_window_minutes: Max gap between a search and the
+                recall of its top result for it to count as "clicked".
+
+        Returns:
+            Dict with click_through_rate, searches_per_recall (avg),
+            average_recall_rank — each None when there is no data to
+            compute it from.
+        """
+
+        cursor = conn.execute(
+            "SELECT session_id, ts, tool, returned_ids, top_result_id, "
+            "entry_id FROM query_log WHERE tool IN ('search', 'recall') "
+            "ORDER BY session_id, ts"
+        )
+
+        clicked = 0
+        recalls_with_prior_search = 0
+        searches_per_recall_samples: list[int] = []
+        recall_ranks: list[int] = []
+
+        current_session: str | None = None
+        pending_searches: list[dict[str, Any]] = []
+        searches_since_recall = 0
+
+        for row in cursor:
+            if row["session_id"] != current_session:
+                current_session = row["session_id"]
+                pending_searches = []
+                searches_since_recall = 0
+
+            if row["tool"] == "search":
+                pending_searches.append(row)
+                searches_since_recall += 1
+                continue
+
+            # tool == "recall"
+            if not pending_searches:
+                continue
+
+            recalls_with_prior_search += 1
+            searches_per_recall_samples.append(searches_since_recall)
+
+            recalled_id = row["entry_id"]
+            for search_row in reversed(pending_searches):
+                returned = (
+                    json.loads(search_row["returned_ids"])
+                    if search_row["returned_ids"]
+                    else []
+                )
+                if recalled_id in returned:
+                    recall_ranks.append(returned.index(recalled_id) + 1)
+                    if search_row["top_result_id"] == recalled_id:
+                        try:
+                            search_ts = datetime.fromisoformat(search_row["ts"])
+                            recall_ts = datetime.fromisoformat(row["ts"])
+                            gap_minutes = (
+                                recall_ts - search_ts
+                            ).total_seconds() / 60
+                            if 0 <= gap_minutes <= click_through_window_minutes:
+                                clicked += 1
+                        except (ValueError, TypeError):
+                            pass
+                    break
+
+            pending_searches = []
+            searches_since_recall = 0
+
+        return {
+            "click_through_rate": round(clicked / recalls_with_prior_search, 4)
+            if recalls_with_prior_search
+            else None,
+            "searches_per_recall": round(
+                sum(searches_per_recall_samples) / len(searches_per_recall_samples), 2
+            )
+            if searches_per_recall_samples
+            else None,
+            "average_recall_rank": round(sum(recall_ranks) / len(recall_ranks), 2)
+            if recall_ranks
+            else None,
+        }
+
+    def get_analytics_snapshot(
+        self,
+        click_through_window_minutes: float = CLICK_THROUGH_WINDOW_MINUTES,
+        dead_entry_stale_days: float = DEAD_ENTRY_STALE_DAYS,
+        zero_hit_limit: int = ZERO_HIT_QUERIES_LIMIT,
+    ) -> dict[str, Any]:
+        """
+        Aggregate query_log + entries into the /api/analytics metric set.
+
+        Args:
+            click_through_window_minutes: See _session_analytics.
+            dead_entry_stale_days: An entry with a nonzero access_count is
+                "dead" once last_accessed is older than this.
+            zero_hit_limit: Cap on the zero-hit-queries list, most
+                frequent first.
+
+        Returns:
+            Dict covering every metric from IDEA.md's "What the team gets
+            to see" table except session-cost×memory-usage (deferred,
+            local-only in v1 — see kb://b47cdbc9).
+        """
+
+        conn = self._connect()
+        try:
+            tool_counts = dict(
+                conn.execute(
+                    "SELECT tool, COUNT(*) FROM query_log GROUP BY tool"
+                ).fetchall()
+            )
+            searches = tool_counts.get("search", 0)
+            recalls = tool_counts.get("recall", 0)
+            remembers = tool_counts.get("remember", 0)
+            reads = searches + recalls
+
+            hit_row = conn.execute(
+                "SELECT AVG(hit) FROM query_log WHERE tool = 'search'"
+            ).fetchone()
+            hit_rate = round(hit_row[0], 4) if hit_row[0] is not None else None
+
+            zero_hit_queries = [
+                {"query": row["query_text"], "count": row["cnt"]}
+                for row in conn.execute(
+                    "SELECT query_text, COUNT(*) AS cnt FROM query_log "
+                    "WHERE tool = 'search' AND hit = 0 AND query_text IS NOT NULL "
+                    "GROUP BY query_text ORDER BY cnt DESC LIMIT ?",
+                    (zero_hit_limit,),
+                )
+            ]
+
+            hit_distribution_by_type = {
+                (row["entry_type"] or "(unfiltered)"): {
+                    "hit_rate": round(row["avg_hit"], 4),
+                    "total": row["total"],
+                }
+                for row in conn.execute(
+                    "SELECT entry_type, AVG(hit) AS avg_hit, COUNT(*) AS total "
+                    "FROM query_log WHERE tool = 'search' GROUP BY entry_type"
+                )
+            }
+
+            dead_row = conn.execute(
+                "SELECT COUNT(*), COUNT(CASE WHEN access_count = 0 THEN 1 END) "
+                "FROM entries"
+            ).fetchone()
+            total_entries, never_accessed = dead_row[0], dead_row[1]
+            stale_cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=dead_entry_stale_days)
+            ).isoformat()
+            stale_accessed = conn.execute(
+                "SELECT COUNT(*) FROM entries WHERE access_count > 0 "
+                "AND last_accessed != '' AND last_accessed < ?",
+                (stale_cutoff,),
+            ).fetchone()[0]
+
+            sessions_touching_engram = conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM query_log"
+            ).fetchone()[0]
+
+            session_metrics = self._session_analytics(
+                conn, click_through_window_minutes
+            )
+        finally:
+            conn.close()
+
+        return {
+            "read_write_ratio": round(reads / remembers, 2) if remembers else None,
+            "searches": searches,
+            "recalls": recalls,
+            "remembers": remembers,
+            "hit_rate": hit_rate,
+            "zero_hit_queries": zero_hit_queries,
+            "hit_distribution_by_type": hit_distribution_by_type,
+            "dead_entries": {
+                "never_accessed": never_accessed,
+                "stale": stale_accessed,
+                "total_entries": total_entries,
+            },
+            "sessions_touching_engram": sessions_touching_engram,
+            **session_metrics,
+        }

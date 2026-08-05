@@ -19,7 +19,7 @@ import pytest
 # Allow importing from project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import Client, FastMCP
 
 from database import KnowledgeBase
 from schema import load_schema
@@ -49,6 +49,12 @@ def _setup(tmp_path: Path) -> tuple[FastMCP, KnowledgeBase, logging.Logger]:
 # ---------------------------------------------------------------------------
 
 
+def _list_tools(mcp: FastMCP) -> list:
+    """List registered tools synchronously."""
+
+    return asyncio.new_event_loop().run_until_complete(mcp.list_tools())
+
+
 class TestToolRegistration:
     """Verify that register_tools() creates the expected MCP tools."""
 
@@ -57,7 +63,7 @@ class TestToolRegistration:
 
         mcp, _kb, _logger = _setup
 
-        tool_names = {t.name for t in mcp._tool_manager.list_tools()}
+        tool_names = {t.name for t in _list_tools(mcp)}
         expected = {
             "search",
             "recall",
@@ -76,7 +82,7 @@ class TestToolRegistration:
 
         mcp, _kb, _logger = _setup
 
-        tool_names = {t.name for t in mcp._tool_manager.list_tools()}
+        tool_names = {t.name for t in _list_tools(mcp)}
         expected = {
             "search",
             "recall",
@@ -356,12 +362,38 @@ _HUB_ID = "11111111-1111-4111-8111-111111111111"
 
 
 def _call_tool(mcp: FastMCP, name: str, arguments: dict) -> dict:
-    """Call an MCP tool synchronously and return the raw dict result."""
-    # Use _tool_manager.call_tool with convert_result=False to get the raw
-    # return value from the tool closure (a dict), not ContentBlock objects.
-    coro = mcp._tool_manager.call_tool(name, arguments)
-    # Run coroutine
-    return asyncio.new_event_loop().run_until_complete(coro)
+    """
+    Call an MCP tool synchronously and return the raw dict result.
+
+    Uses an in-memory Client rather than mcp.call_tool() directly — tool
+    bodies that take a `ctx: Context` param (search/recall/remember, for
+    session-scoped usage-analytics logging) need ctx.session_id, which
+    raises RuntimeError outside a real client session. Each call opens
+    its own Client, so callers needing a *stable* session_id across
+    several calls (e.g. click-through/searches-per-recall tests) must use
+    _call_tools_in_session instead.
+    """
+
+    async def _run() -> dict:
+        async with Client(mcp) as client:
+            result = await client.call_tool(name, arguments)
+            return result.data
+
+    return asyncio.new_event_loop().run_until_complete(_run())
+
+
+def _call_tools_in_session(mcp: FastMCP, calls: list[tuple[str, dict]]) -> list[dict]:
+    """Call several MCP tools within one Client session (shared session_id)."""
+
+    async def _run() -> list[dict]:
+        results = []
+        async with Client(mcp) as client:
+            for name, arguments in calls:
+                result = await client.call_tool(name, arguments)
+                results.append(result.data)
+        return results
+
+    return asyncio.new_event_loop().run_until_complete(_run())
 
 
 class TestRememberAtomicityWarnings:
@@ -814,15 +846,16 @@ class TestEntryTypeEnum:
 
         mcp, _kb, _logger = _setup
 
-        tool = next(
-            t for t in mcp._tool_manager.list_tools() if t.name == "remember"
-        )
+        tool = next(t for t in _list_tools(mcp) if t.name == "remember")
         schema = tool.parameters
         entry_type = schema["properties"]["entry_type"]
 
-        # Pydantic emits enums as a $ref into $defs
-        ref = entry_type.get("$ref", "")
-        definition = schema["$defs"][ref.rsplit("/", 1)[-1]]
+        # fastmcp/pydantic may inline a plain str enum directly, or emit
+        # it as a $ref into $defs — accept either form.
+        if "$ref" in entry_type:
+            definition = schema["$defs"][entry_type["$ref"].rsplit("/", 1)[-1]]
+        else:
+            definition = entry_type
 
         assert set(definition["enum"]) == set(load_schema(None).types)
 
@@ -1108,6 +1141,64 @@ class TestQueryLog:
         monkeypatch.delenv("ENGRAM_QUERY_LOG", raising=False)
 
         _call_tool(mcp, "search", {"query": "anything"})
+
+
+class TestUsageAnalytics:
+    """query_log SQLite writes and /api/analytics aggregation, via the tools."""
+
+    def test_search_recall_remember_are_logged(self, _setup: tuple) -> None:
+        """Each tool call writes one query_log row, reflected in the snapshot."""
+
+        mcp, kb, _logger = _setup
+
+        _call_tool(
+            mcp,
+            "remember",
+            {
+                "title": "Analytics Target",
+                "content": "Searchable body for analytics.",
+                "tags": ["test"],
+                "entry_type": "snippet",
+            },
+        )
+        _call_tool(mcp, "search", {"query": "searchable analytics"})
+        _call_tool(mcp, "search", {"query": "zzz-nothing-matches-zzz"})
+
+        snapshot = kb.get_analytics_snapshot()
+
+        assert snapshot["remembers"] == 1
+        assert snapshot["searches"] == 2
+        assert snapshot["hit_rate"] == 0.5
+        assert any(
+            q["query"] == "zzz-nothing-matches-zzz"
+            for q in snapshot["zero_hit_queries"]
+        )
+
+    def test_click_through_and_recall_rank_within_one_session(
+        self, _setup: tuple
+    ) -> None:
+        """A search followed by a recall of its top result, same session,
+        counts as click-through with recall rank 1."""
+
+        mcp, kb, _logger = _setup
+
+        created = kb.remember(
+            "Click Target", "Unique clickable content.", ["test"], "snippet"
+        )
+
+        _call_tools_in_session(
+            mcp,
+            [
+                ("search", {"query": "clickable"}),
+                ("recall", {"entry_id": created["id"]}),
+            ],
+        )
+
+        snapshot = kb.get_analytics_snapshot()
+
+        assert snapshot["click_through_rate"] == 1.0
+        assert snapshot["average_recall_rank"] == 1
+        assert snapshot["searches_per_recall"] == 1
 
 
 # ---------------------------------------------------------------------------

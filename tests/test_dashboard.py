@@ -183,3 +183,30 @@ def test_update_rejects_type_outside_schema(
 
     assert res.status_code == 400
     assert kb.get(created["id"])["type"] == "snippet"
+
+
+def test_analytics_endpoint_reflects_query_log(
+    kb: KnowledgeBase, client: TestClient
+) -> None:
+    kb._backend.log_query_event(
+        ts="2026-08-05T00:00:00+00:00",
+        session_id="s1",
+        tool="search",
+        query_text="widget",
+        hit=True,
+    )
+    kb._backend.log_query_event(
+        ts="2026-08-05T00:00:00+00:00",
+        session_id="s1",
+        tool="search",
+        query_text="nothing found",
+        hit=False,
+    )
+
+    res = client.get("/api/analytics")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["searches"] == 2
+    assert body["hit_rate"] == 0.5
+    assert {"query": "nothing found", "count": 1} in body["zero_hit_queries"]

@@ -162,6 +162,10 @@ def create_app(kb_resolver: Callable[[Request], KnowledgeBase]) -> FastAPI:
         tag_list = kb_resolver(request).list_tags()
         return {"count": len(tag_list), "tags": tag_list}
 
+    @app.get("/api/analytics")
+    def get_analytics(request: Request) -> dict:
+        return kb_resolver(request).get_analytics_snapshot()
+
     @app.get("/")
     def index(request: Request):
         try:

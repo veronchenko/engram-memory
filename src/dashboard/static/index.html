@@ -363,6 +363,7 @@
       <div class="topbar-actions">
         <a id="team-badge" href="/admin" hidden></a>
         <div id="spinner" role="status" aria-label="Loading"></div>
+        <button id="btn-analytics">Analytics</button>
         <button id="btn-new" class="primary">+ New entry</button>
       </div>
     </div>
@@ -1585,6 +1586,54 @@ $("#btn-new").addEventListener("click", () => {
   openPanel();
 });
 $("#panel-close").addEventListener("click", closePanel);
+
+function renderZeroHitList(items) {
+  if (!items.length) return "<p>None — every search returned something.</p>";
+  return `<ul>${items.map(q => `<li>${escapeHtml(q.query)} <span class="pill">${q.count}</span></li>`).join("")}</ul>`;
+}
+function renderHitDistribution(dist) {
+  const rows = Object.entries(dist);
+  if (!rows.length) return "<p>No search data yet.</p>";
+  return `<table><tbody>${rows.map(([type, d]) =>
+    `<tr><td>${escapeHtml(type)}</td><td>${(d.hit_rate * 100).toFixed(0)}%</td><td>${d.total}</td></tr>`
+  ).join("")}</tbody></table>`;
+}
+function pct(v) { return v === null || v === undefined ? "—" : `${(v * 100).toFixed(0)}%`; }
+function num(v) { return v === null || v === undefined ? "—" : v; }
+
+async function openAnalytics() {
+  selectedId = null;
+  swapPanelContent(`<button id="panel-close" aria-label="Close panel">&times;</button><h2>Analytics</h2><p>Loading…</p>`);
+  $("#panel-close").addEventListener("click", closePanel);
+  openPanel();
+  try {
+    const res = await fetch("/api/analytics");
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `Couldn't load analytics (error ${res.status}).`));
+    const a = await res.json();
+    swapPanelContent(`
+      <button id="panel-close" aria-label="Close panel">&times;</button>
+      <h2>Analytics</h2>
+      <div id="meta">
+        Read/write ratio: ${num(a.read_write_ratio)} · searches ${a.searches} · recalls ${a.recalls} · remembers ${a.remembers}<br>
+        Sessions touching Engram: ${a.sessions_touching_engram}
+      </div>
+      <label>Hit rate</label><div>${pct(a.hit_rate)}</div>
+      <label>Click-through (search → recall)</label><div>${pct(a.click_through_rate)}</div>
+      <label>Searches per recall</label><div>${num(a.searches_per_recall)}</div>
+      <label>Average recall rank</label><div>${num(a.average_recall_rank)}</div>
+      <label>Dead entries</label>
+      <div>${a.dead_entries.never_accessed} never accessed, ${a.dead_entries.stale} stale, of ${a.dead_entries.total_entries} total</div>
+      <label>Hit distribution by type</label>
+      ${renderHitDistribution(a.hit_distribution_by_type)}
+      <label>Zero-hit queries</label>
+      ${renderZeroHitList(a.zero_hit_queries)}
+    `);
+    $("#panel-close").addEventListener("click", closePanel);
+  } catch (err) {
+    showToast(err instanceof TypeError ? networkErrorMessage("load analytics") : (err.message || "Couldn't load analytics. Try again."));
+  }
+}
+$("#btn-analytics").addEventListener("click", openAnalytics);
 
 window.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
